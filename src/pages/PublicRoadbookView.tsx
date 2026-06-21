@@ -41,6 +41,26 @@ const nodeTypeConfig = {
   rest: { color: 'bg-amber-500', textColor: 'text-amber-600', bgColor: 'bg-amber-50', label: '休息' },
 };
 
+function loadSharedDataByCode(code: string): {
+  activity: Activity;
+  members: Member[];
+  roadbook: Roadbook;
+  signRecords?: MemberSignRecord[];
+} | null {
+  if (!code) return null;
+  try {
+    const raw = localStorage.getItem(`roadbook_share_${code.toUpperCase()}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.activity && parsed.members && parsed.roadbook && parsed.roadbook.published) {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export default function PublicRoadbookView() {
   const { activity, members, roadbook, signRecords } = useAppStore();
   const [searchParams] = useSearchParams();
@@ -60,7 +80,6 @@ export default function PublicRoadbookView() {
   const [showRules, setShowRules] = useState(true);
   const [showSchedule, setShowSchedule] = useState(true);
   const [codeError, setCodeError] = useState('');
-  const [hasNoLocalData, setHasNoLocalData] = useState(false);
 
   useEffect(() => {
     if (urlToken) {
@@ -74,7 +93,6 @@ export default function PublicRoadbookView() {
         });
         setExternalDecodeError(null);
         setVerified(true);
-        setHasNoLocalData(false);
       } else {
         setExternalDecodeError('链接无效或已损坏，请尝试使用分享码方式进入');
       }
@@ -82,13 +100,15 @@ export default function PublicRoadbookView() {
   }, [urlToken]);
 
   useEffect(() => {
-    if (!externalData && urlCode && !verified) {
-      if (roadbook.published && roadbook.shareCode && urlCode.toUpperCase() === roadbook.shareCode.toUpperCase()) {
-        setVerified(true);
-        setHasNoLocalData(false);
-      } else if (!roadbook.published || !roadbook.shareCode) {
-        setHasNoLocalData(true);
-      }
+    if (externalData || verified || !urlCode) return;
+    const shared = loadSharedDataByCode(urlCode);
+    if (shared) {
+      setExternalData(shared);
+      setVerified(true);
+      return;
+    }
+    if (roadbook.published && roadbook.shareCode && urlCode.toUpperCase() === roadbook.shareCode.toUpperCase()) {
+      setVerified(true);
     }
   }, [urlCode, roadbook.shareCode, roadbook.published, verified, externalData]);
 
@@ -100,19 +120,24 @@ export default function PublicRoadbookView() {
   const confirmedMembers = effectiveMembers.filter((m) => m.status === 'confirmed');
 
   const handleVerify = () => {
-    if (!effectiveRoadbook.published || !effectiveRoadbook.shareCode) {
-      setHasNoLocalData(true);
+    const code = codeInput.trim().toUpperCase();
+    if (!code) {
+      setCodeError('请输入分享码');
+      return;
+    }
+    const shared = loadSharedDataByCode(code);
+    if (shared) {
+      setExternalData(shared);
+      setVerified(true);
       setCodeError('');
       return;
     }
-    if (codeInput.toUpperCase() === effectiveRoadbook.shareCode.toUpperCase()) {
+    if (roadbook.published && roadbook.shareCode && code === roadbook.shareCode.toUpperCase()) {
       setVerified(true);
       setCodeError('');
-      setHasNoLocalData(false);
-    } else {
-      setCodeError('分享码不正确，请确认后重试');
-      setHasNoLocalData(false);
+      return;
     }
+    setCodeError('分享码不正确，或本设备没有这份路书数据。跨设备查看请使用领队发送的完整链接');
   };
 
   const selectedMember: Member | null = selectedMemberId
@@ -149,7 +174,7 @@ export default function PublicRoadbookView() {
             车队路书
           </h1>
           <p className="text-sm text-slate-500 text-center mb-6">
-            请输入领队分享的 6 位分享码，或使用领队发送的完整跨设备链接直接进入
+            输入领队分享的 6 位分享码即可查看
           </p>
 
           {externalDecodeError && (
@@ -157,18 +182,6 @@ export default function PublicRoadbookView() {
               <p className="text-xs text-red-700 flex items-center gap-1.5">
                 <AlertCircle className="w-4 h-4 flex-shrink-0" />
                 {externalDecodeError}
-              </p>
-            </div>
-          )}
-
-          {hasNoLocalData && (
-            <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
-              <p className="text-sm font-medium text-amber-800 flex items-start gap-2 mb-1.5">
-                <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                当前设备没有这份路书
-              </p>
-              <p className="text-xs text-amber-700 leading-relaxed">
-                6 位分享码只能在<strong>领队发布时那台电脑</strong>上使用。如需在手机或其它设备查看，请让领队点击<strong>「复制跨设备分享链接」</strong>后发送给您，完整链接内包含了全部路书数据。
               </p>
             </div>
           )}
@@ -181,7 +194,7 @@ export default function PublicRoadbookView() {
                 value={codeInput}
                 onChange={(e) => {
                   setCodeInput(e.target.value.toUpperCase());
-                  setHasNoLocalData(false);
+                  setCodeError('');
                 }}
                 onKeyDown={(e) => e.key === 'Enter' && handleVerify()}
                 maxLength={6}
@@ -189,9 +202,9 @@ export default function PublicRoadbookView() {
                 className="w-full px-4 py-3 border border-slate-300 rounded-xl text-center text-xl font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent uppercase"
               />
               {codeError && (
-                <p className="text-xs text-red-600 mt-2 flex items-center gap-1 justify-center">
-                  <AlertCircle className="w-3.5 h-3.5" />
-                  {codeError}
+                <p className="text-xs text-red-600 mt-2 flex items-start gap-1 justify-center text-left">
+                  <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                  <span>{codeError}</span>
                 </p>
               )}
             </div>
@@ -204,9 +217,8 @@ export default function PublicRoadbookView() {
           </div>
 
           <div className="mt-6 pt-6 border-t border-slate-100 text-center text-xs text-slate-400 space-y-1">
-            <p className="text-slate-500 font-medium">💡 小贴士</p>
-            <p>跨设备查看请使用领队发送的完整链接（URL 含 token 参数）</p>
-            <p>链接内包含所有活动和成员数据，无需联网即可打开</p>
+            <p>如分享码在本设备无法验证，请让领队发送完整分享链接</p>
+            <p>完整链接包含所有数据，任何设备可直接打开</p>
           </div>
         </div>
       </div>

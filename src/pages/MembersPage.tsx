@@ -121,40 +121,70 @@ export default function MembersPage() {
     setShowAddForm(false);
   };
 
-  const parseBoolean = (val: string): boolean => {
+  const TRUE_SET = new Set(['是', '有', '带', '携', '1', '真', 'y', 'yes', 'true']);
+  const FALSE_SET = new Set(['否', '无', '没', '不', '0', '假', 'n', 'no', 'false']);
+
+  const parseBool = (val: string): boolean | null => {
     const v = val.trim().toLowerCase();
-    if (!v) return false;
-    const trueValues = ['是', '有', '带', '携', '1', '真', 'y', 'yes', 'true'];
-    const falseValues = ['否', '无', '没', '不', '0', '假', 'n', 'no', 'false'];
-    if (trueValues.includes(v)) return true;
-    if (falseValues.includes(v)) return false;
-    return false;
+    if (!v) return null;
+    if (TRUE_SET.has(v)) return true;
+    if (FALSE_SET.has(v)) return false;
+    return null;
   };
 
-  const NEGATIVE_PREFIX = /^(无|没|不|否|非)/;
-  const POSITIVE_PREFIX = /^(有|带|携|是)/;
-
-  const parseBooleanField = (token: string, keywords: RegExp): boolean => {
+  const classifyToken = (
+    token: string,
+    pos: number,
+    totalRest: number
+  ): { type: 'experience' | 'elderly' | 'children' | 'tail' | 'phone' | 'color' | 'bool_elderly' | 'bool_children' | 'bool_tail' | 'skip'; value: any } | null => {
     const t = token.trim();
-    if (!t) return false;
-    const lowerT = t.toLowerCase();
+    const tl = t.toLowerCase();
+    if (!t) return null;
 
-    const kwMatch = t.match(keywords) || lowerT.match(keywords);
-    if (!kwMatch) return false;
+    if (tl === '新手' || tl === 'novice') return { type: 'experience', value: 'novice' as DrivingExperience };
+    if (tl === '熟练' || tl === 'intermediate') return { type: 'experience', value: 'intermediate' as DrivingExperience };
+    if (tl === '老司机' || tl === 'expert') return { type: 'experience', value: 'expert' as DrivingExperience };
 
-    const withoutKw = t.replace(keywords, '').replace(lowerT.match(keywords) ? new RegExp(keywords.source, keywords.flags) : '', '').trim();
+    const hasElderlyKw = /老|老人|elderly/i.test(tl);
+    const hasChildrenKw = /孩|孩子|儿童|children/i.test(tl);
+    const hasTailKw = /尾|尾车|tail/i.test(tl);
+    const isNegPrefix = /^(无|没|不|否|非)/.test(t);
+    const isPosPrefix = /^(有|带|携|是)/.test(t);
 
-    if (!withoutKw) {
-      if (NEGATIVE_PREFIX.test(t)) return false;
-      if (POSITIVE_PREFIX.test(t)) return true;
-      return true;
+    if (hasElderlyKw) {
+      const stripped = t.replace(/老|老人|elderly/gi, '').replace(/^(无|没|不|否|非|有|带|携|是)/, '').trim();
+      const val = stripped ? parseBool(stripped) ?? true : (isNegPrefix ? false : true);
+      return { type: 'elderly', value: val };
+    }
+    if (hasChildrenKw) {
+      const stripped = t.replace(/孩|孩子|儿童|children/gi, '').replace(/^(无|没|不|否|非|有|带|携|是)/, '').trim();
+      const val = stripped ? parseBool(stripped) ?? true : (isNegPrefix ? false : true);
+      return { type: 'children', value: val };
+    }
+    if (hasTailKw) {
+      const stripped = t.replace(/尾|尾车|tail/gi, '').replace(/^(无|没|不|否|非|有|带|携|是)/, '').trim();
+      const val = stripped ? parseBool(stripped) ?? true : (isNegPrefix ? false : true);
+      return { type: 'tail', value: val };
     }
 
-    const negMatch = t.match(NEGATIVE_PREFIX);
-    if (negMatch && !withoutKw) return false;
-    if (POSITIVE_PREFIX.test(t) && !withoutKw) return true;
+    if (/^\d{3,}$/.test(t)) return { type: 'phone', value: t };
 
-    return parseBoolean(withoutKw);
+    if (t.length <= 4 && !/^\d+$/.test(t)) return { type: 'color', value: t };
+
+    const bv = parseBool(t);
+    if (bv !== null) {
+      if (totalRest <= 3) {
+        if (pos === 0) return { type: 'bool_elderly', value: bv };
+        if (pos === 1) return { type: 'bool_children', value: bv };
+        if (pos === 2) return { type: 'bool_tail', value: bv };
+      } else {
+        if (pos === 3) return { type: 'bool_elderly', value: bv };
+        if (pos === 4) return { type: 'bool_children', value: bv };
+        if (pos === 5) return { type: 'bool_tail', value: bv };
+      }
+    }
+
+    return null;
   };
 
   const parseBatchText = (text: string): { members: Omit<Member, 'id'>[]; errors: string[] } => {
@@ -162,14 +192,6 @@ export default function MembersPage() {
     const members: Omit<Member, 'id'>[] = [];
     const errors: string[] = [];
     let lineIdx = 0;
-
-    const isKeywordOnly = (token: string, keywords: RegExp): boolean => {
-      const t = token.trim();
-      if (!t) return false;
-      const stripped = t.replace(NEGATIVE_PREFIX, '').replace(POSITIVE_PREFIX, '').trim();
-      if (!stripped) return keywords.test(t.toLowerCase());
-      return keywords.test(t.toLowerCase()) && parseBoolean(stripped);
-    };
 
     for (const line of lines) {
       lineIdx++;
@@ -186,32 +208,29 @@ export default function MembersPage() {
       let experience: DrivingExperience | null = null;
       let phone = '';
       let carColor = '';
-      let hasElderly = false;
-      let hasChildren = false;
-      let willingTail = false;
+      let hasElderly: boolean | null = null;
+      let hasChildren: boolean | null = null;
+      let willingTail: boolean | null = null;
 
       for (let i = 0; i < rest.length; i++) {
-        const token = rest[i];
-        const t = token.toLowerCase();
-        if (t === '新手' || t === 'novice') experience = 'novice';
-        else if (t === '熟练' || t === 'intermediate') experience = 'intermediate';
-        else if (t === '老司机' || t === 'expert') experience = 'expert';
-        else if (isKeywordOnly(token, /老|老人|elderly/i)) hasElderly = !NEGATIVE_PREFIX.test(token);
-        else if (isKeywordOnly(token, /孩|孩子|儿童|children/i)) hasChildren = !NEGATIVE_PREFIX.test(token);
-        else if (isKeywordOnly(token, /尾|尾车|tail/i)) willingTail = !NEGATIVE_PREFIX.test(token);
-        else if (/^\d{3,}$/.test(token)) phone = token;
-        else if (token.length <= 4 && !/^\d+$/.test(token)) {
-          if (carColor) {
-            errors.push(`第 ${lineIdx} 行：重复识别颜色「${token}」，保留首次识别的「${carColor}」`);
-          } else {
-            carColor = token;
-          }
-        } else if (parseBoolean(token) || NEGATIVE_PREFIX.test(token) || POSITIVE_PREFIX.test(token) || t === 'n' || t === 'no' || t === 'false' || t === '0') {
-          if (i >= 6 || rest.length <= 9) {
-            if (i === 6 || (i === rest.length - 3 && rest.length <= 9)) hasElderly = parseBoolean(token) || (isKeywordOnly(token, /老|老人|elderly/i) && !NEGATIVE_PREFIX.test(token));
-            else if (i === 7 || (i === rest.length - 2 && rest.length <= 9)) hasChildren = parseBoolean(token) || (isKeywordOnly(token, /孩|孩子|children/i) && !NEGATIVE_PREFIX.test(token));
-            else if (i === 8 || (i === rest.length - 1 && rest.length <= 9)) willingTail = parseBoolean(token) || (isKeywordOnly(token, /尾|尾车|tail/i) && !NEGATIVE_PREFIX.test(token));
-          }
+        const cls = classifyToken(rest[i], i, rest.length);
+        if (!cls) continue;
+        switch (cls.type) {
+          case 'experience': experience = cls.value; break;
+          case 'elderly': hasElderly = cls.value; break;
+          case 'children': hasChildren = cls.value; break;
+          case 'tail': willingTail = cls.value; break;
+          case 'phone': phone = cls.value; break;
+          case 'color':
+            if (carColor) {
+              errors.push(`第 ${lineIdx} 行：重复识别颜色「${rest[i]}」，保留首次识别的「${carColor}」`);
+            } else {
+              carColor = cls.value;
+            }
+            break;
+          case 'bool_elderly': hasElderly = cls.value; break;
+          case 'bool_children': hasChildren = cls.value; break;
+          case 'bool_tail': willingTail = cls.value; break;
         }
       }
 
@@ -230,9 +249,9 @@ export default function MembersPage() {
         phone,
         range,
         drivingExperience: experience,
-        hasElderly,
-        hasChildren,
-        willingTail,
+        hasElderly: hasElderly ?? false,
+        hasChildren: hasChildren ?? false,
+        willingTail: willingTail ?? false,
         status: 'confirmed',
       });
     }

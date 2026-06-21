@@ -110,6 +110,15 @@ export const useAppStore = create<AppState>((set, get) => ({
           signRecords: state.signRecords,
         })
       );
+      if (state.roadbook.published && state.roadbook.shareCode) {
+        const shareKey = `roadbook_share_${state.roadbook.shareCode}`;
+        localStorage.setItem(shareKey, JSON.stringify({
+          activity: state.activity,
+          members: state.members,
+          roadbook: state.roadbook,
+          signRecords: state.signRecords,
+        }));
+      }
     } catch (err) {
       console.warn('Failed to persist state to localStorage', err);
     }
@@ -301,16 +310,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   publishRoadbook: () => {
-    set((state) => ({
-      roadbook: {
+    set((state) => {
+      const newRoadbook = {
         ...state.roadbook,
         published: true,
         publishedAt: new Date().toISOString(),
         shareCode:
           state.roadbook.shareCode ||
           Math.random().toString(36).substring(2, 8).toUpperCase(),
-      },
-    }));
+      };
+      return { roadbook: newRoadbook };
+    });
     get()._persist();
   },
 
@@ -354,11 +364,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSignStatus: (memberId, status, remark) => {
     set((state) => {
       const existing = state.signRecords.find((r) => r.memberId === memberId);
+      const finalRemark = remark !== undefined ? remark : existing?.remark;
       const newRecord: MemberSignRecord = {
         memberId,
         status,
         signedAt: status === 'not_arrived' ? undefined : new Date().toISOString(),
-        remark,
+        remark: finalRemark,
       };
       const rest = state.signRecords.filter((r) => r.memberId !== memberId);
       const signRecords = status === 'not_arrived' && !existing ? state.signRecords : [...rest, newRecord];

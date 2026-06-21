@@ -251,13 +251,11 @@ export default function ExecutionPage() {
                         return (
                           <button
                             key={opt.value}
-                            onClick={() =>
-                              setSignStatus(
-                                member.id,
-                                active ? 'not_arrived' : opt.value,
-                                remarkInput?.memberId === member.id ? remarkInput.value : undefined
-                              )
-                            }
+                            onClick={() => {
+                              const newStatus = active ? 'not_arrived' : opt.value;
+                              const newRemark = remarkInput?.memberId === member.id ? remarkInput.value : undefined;
+                              setSignStatus(member.id, newStatus, newRemark);
+                            }}
                             className={cn(
                               'flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium ring-1 transition-all',
                               active
@@ -283,6 +281,7 @@ export default function ExecutionPage() {
                           onChange={(e) => setRemarkInput({ memberId: member.id, value: e.target.value })}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
+                              setSignStatus(member.id, status, remarkInput.value);
                               setRemarkInput(null);
                             }
                           }}
@@ -291,10 +290,19 @@ export default function ExecutionPage() {
                           autoFocus
                         />
                         <button
+                          onClick={() => {
+                            setSignStatus(member.id, status, remarkInput.value);
+                            setRemarkInput(null);
+                          }}
+                          className="px-3 py-1.5 text-xs text-white bg-teal-600 hover:bg-teal-700 rounded-lg transition-colors"
+                        >
+                          保存
+                        </button>
+                        <button
                           onClick={() => setRemarkInput(null)}
                           className="px-3 py-1.5 text-xs text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
                         >
-                          完成
+                          取消
                         </button>
                       </div>
                     ) : (

@@ -412,12 +412,23 @@ export default function ActivityPage() {
                         {node.arrivalTime && (
                           <div className="text-sm mt-1">
                             <span className="text-slate-400">到达 </span>
-                            <span className="font-mono font-semibold text-slate-700">{node.arrivalTime}</span>
+                            {node.arrivalTimeEarly && node.arrivalTimeLate
+                              ? (
+                                <span className="font-mono font-semibold text-slate-700">
+                                  <span className="text-slate-500 font-normal">±</span>
+                                  <span className="text-teal-600">{node.arrivalTimeEarly}</span>
+                                  <span className="text-slate-400"> ~ </span>
+                                  <span className="text-orange-600">{node.arrivalTimeLate}</span>
+                                </span>
+                              )
+                              : (
+                                <span className="font-mono font-semibold text-slate-700">{node.arrivalTime}</span>
+                              )}
                           </div>
                         )}
-                        {node.distance && node.type === 'driving' && (
+                        {(node.distance && (node.type === 'driving' || node.type === 'rest' || node.type === 'supply' || node.type === 'scenic' || node.type === 'lunch')) && (
                           <div className="text-xs text-slate-400 mt-1">
-                            {node.distance} km
+                            里程 {node.distance} km
                           </div>
                         )}
                       </div>

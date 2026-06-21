@@ -1,4 +1,4 @@
-import { Member, Activity, AnalysisResult } from '@/types';
+import { Member, Activity, AnalysisResult, SuggestedStop } from '@/types';
 
 export function analyzeMembers(members: Member[], activity: Activity): AnalysisResult {
   const confirmedMembers = members.filter(m => m.status === 'confirmed');
@@ -16,6 +16,7 @@ export function analyzeMembers(members: Member[], activity: Activity): AnalysisR
         ? Math.max(...activity.checkpoints.map(c => c.distance))
         : 0,
       estimatedDriveTime: 0,
+      suggestedStops: [],
     };
   }
 
@@ -38,11 +39,25 @@ export function analyzeMembers(members: Member[], activity: Activity): AnalysisR
     : 0;
 
   const restSuggestions: string[] = [];
+  const suggestedStops: SuggestedStop[] = [];
   let riskLevel: 'low' | 'medium' | 'high' = 'low';
 
   if (totalDistance > minRange * 0.8) {
     restSuggestions.push(`⚠️ 最弱续航车辆为 ${minRangeMember.carModel}（${minRangeMember.name}），续航 ${minRange}km，全程 ${totalDistance}km，建议安排充电或补给点`);
     riskLevel = 'high';
+    const safeRange = minRange * 0.7;
+    const supplyCount = Math.ceil(totalDistance / safeRange);
+    for (let i = 1; i <= supplyCount - 1; i++) {
+      suggestedStops.push({
+        id: `stop-supply-${i}`,
+        type: 'supply',
+        distance: Math.round(safeRange * i),
+        reason: `${minRangeMember.carModel} 续航仅 ${minRange}km，建议在此处充电/加油`,
+        duration: 30,
+        name: `建议补给点 ${i}`,
+        priority: 'high',
+      });
+    }
   } else if (totalDistance > minRange * 0.6) {
     restSuggestions.push(`ℹ️ 最弱续航车辆为 ${minRangeMember.carModel}（${minRangeMember.name}），续航 ${minRange}km，请注意续航管理`);
     if (riskLevel === 'low') riskLevel = 'medium';
@@ -51,11 +66,45 @@ export function analyzeMembers(members: Member[], activity: Activity): AnalysisR
   if (hasNoviceDriver) {
     restSuggestions.push(`⚠️ 车队中有 ${noviceDrivers.length} 位新手驾驶员（${noviceDrivers.map(m => m.name).join('、')}），建议增加休息频次，每1小时休息一次`);
     if (riskLevel === 'low') riskLevel = 'medium';
+    const restInterval = hasElderlyOrChildren ? 60 : 75;
+    const restCount = Math.floor(estimatedDriveTime / restInterval);
+    for (let i = 1; i <= restCount; i++) {
+      const distance = Math.round((activity.averageSpeed * restInterval * i) / 60);
+      if (distance < totalDistance - 30) {
+        suggestedStops.push({
+          id: `stop-novice-${i}`,
+          type: 'rest',
+          distance,
+          reason: '新手驾驶员较多，建议每小时休息15分钟',
+          duration: 15,
+          name: `新手休息点 ${i}`,
+          priority: 'medium',
+        });
+      }
+    }
   }
 
   if (hasElderlyOrChildren) {
     restSuggestions.push('ℹ️ 车队中有老人或儿童同行，建议增加休息点，备齐常用药品');
     if (riskLevel === 'low') riskLevel = 'medium';
+    if (!hasNoviceDriver) {
+      const restInterval = 90;
+      const restCount = Math.floor(estimatedDriveTime / restInterval);
+      for (let i = 1; i <= restCount; i++) {
+        const distance = Math.round((activity.averageSpeed * restInterval * i) / 60);
+        if (distance < totalDistance - 30 && !suggestedStops.some(s => Math.abs(s.distance - distance) < 30)) {
+          suggestedStops.push({
+            id: `stop-family-${i}`,
+            type: 'rest',
+            distance,
+            reason: '有老人或儿童同行，需适当增加休息',
+            duration: 20,
+            name: `家庭休息点 ${i}`,
+            priority: 'medium',
+          });
+        }
+      }
+    }
   }
 
   const willingTailCount = confirmedMembers.filter(m => m.willingTail).length;
@@ -77,6 +126,8 @@ export function analyzeMembers(members: Member[], activity: Activity): AnalysisR
     restSuggestions.push('✅ 车队状态良好，按计划行驶即可');
   }
 
+  suggestedStops.sort((a, b) => a.distance - b.distance);
+
   return {
     minRange,
     minRangeMember,
@@ -87,5 +138,6 @@ export function analyzeMembers(members: Member[], activity: Activity): AnalysisR
     riskLevel,
     totalDistance,
     estimatedDriveTime,
+    suggestedStops,
   };
 }

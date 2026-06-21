@@ -20,74 +20,109 @@ function calculateDriveTime(distance: number, speed: number): number {
   return Math.round((distance / speed) * 60);
 }
 
+const MAX_DRIVE_SEGMENT_MINUTES = 90;
+const REST_DURATION = 15;
+const ARRIVAL_VARIANCE_MINUTES = 15;
+
+interface DrivingSegment {
+  distance: number;
+  duration: number;
+}
+
+function splitLongDrive(totalDistance: number, speed: number): DrivingSegment[] {
+  const totalTime = calculateDriveTime(totalDistance, speed);
+  if (totalTime <= MAX_DRIVE_SEGMENT_MINUTES) {
+    return [{ distance: totalDistance, duration: totalTime }];
+  }
+
+  const segments: DrivingSegment[] = [];
+  const segmentCount = Math.ceil(totalTime / MAX_DRIVE_SEGMENT_MINUTES);
+  const distancePerSegment = totalDistance / segmentCount;
+
+  for (let i = 0; i < segmentCount; i++) {
+    const isLast = i === segmentCount - 1;
+    const segDistance = isLast
+      ? totalDistance - distancePerSegment * (segmentCount - 1)
+      : distancePerSegment;
+    segments.push({
+      distance: Math.round(segDistance * 10) / 10,
+      duration: calculateDriveTime(segDistance, speed),
+    });
+  }
+
+  return segments;
+}
+
 export function generateNodes(activity: Activity): RouteNode[] {
   const nodes: RouteNode[] = [];
-  let currentTime = activity.meetingTime;
+  const meetingEndTime = addMinutes(activity.meetingTime, 30);
+  let currentTime = meetingEndTime;
   let currentDistance = 0;
 
   nodes.push({
-    id: `node-${Date.now()}-1`,
+    id: `node-meeting-${Date.now()}`,
     type: 'meeting',
     name: `集合点：${activity.meetingPoint}`,
-    departureTime: currentTime,
+    departureTime: activity.meetingTime,
+    arrivalTime: activity.meetingTime,
+    arrivalTimeEarly: addMinutes(activity.meetingTime, -15),
+    arrivalTimeLate: activity.meetingTime,
     duration: 30,
     distance: 0,
     notes: '请提前15分钟到达，进行车辆检查和对讲设备调试',
   });
 
-  currentTime = addMinutes(currentTime, 30);
-
   const sortedCheckpoints = [...activity.checkpoints].sort((a, b) => a.order - b.order);
-
   let lastDistance = 0;
+  let driveSegmentCounter = 0;
+  let restCounter = 0;
 
-  sortedCheckpoints.forEach((checkpoint, index) => {
-    const segmentDistance = checkpoint.distance - lastDistance;
-    const driveTime = calculateDriveTime(segmentDistance, activity.averageSpeed);
+  sortedCheckpoints.forEach((checkpoint, cpIndex) => {
+    const segmentTotalDistance = checkpoint.distance - lastDistance;
+    const drivingSegments = splitLongDrive(segmentTotalDistance, activity.averageSpeed);
 
-    if (driveTime >= 120 && checkpoint.type !== 'lunch') {
-      const midDistance = lastDistance + segmentDistance / 2;
-      const midDriveTime = Math.round(driveTime / 2);
-      const midArrivalTime = addMinutes(currentTime, midDriveTime);
+    drivingSegments.forEach((seg, segIndex) => {
+      driveSegmentCounter++;
+      const segArrival = addMinutes(currentTime, seg.duration);
+      const segArrivalEarly = addMinutes(segArrival, -ARRIVAL_VARIANCE_MINUTES);
+      const segArrivalLate = addMinutes(segArrival, ARRIVAL_VARIANCE_MINUTES);
 
       nodes.push({
-        id: `node-drive-${Date.now()}-${index}-rest`,
-        type: 'rest',
-        name: `临时休息点${index + 1}`,
-        arrivalTime: midArrivalTime,
-        departureTime: addMinutes(midArrivalTime, 15),
-        duration: 15,
-        distance: Math.round(midDistance),
-        notes: '建议休息15分钟，活动身体、检查车况',
-      });
-
-      const remainingDriveTime = driveTime - midDriveTime;
-      const remainingStartTime = addMinutes(midArrivalTime, 15);
-      nodes.push({
-        id: `node-drive-${Date.now()}-${index}-2`,
+        id: `node-drive-${Date.now()}-${driveSegmentCounter}`,
         type: 'driving',
-        name: `行驶段 ${index + 1}B`,
-        departureTime: remainingStartTime,
-        arrivalTime: addMinutes(remainingStartTime, remainingDriveTime),
-        duration: remainingDriveTime,
-        distance: Math.round(segmentDistance / 2),
-      });
-    } else {
-      nodes.push({
-        id: `node-drive-${Date.now()}-${index}`,
-        type: 'driving',
-        name: `行驶段 ${index + 1}`,
+        name: `行驶段 ${cpIndex + 1}-${segIndex + 1}${drivingSegments.length > 1 ? `（共${drivingSegments.length}段）` : ''}`,
         departureTime: currentTime,
-        arrivalTime: addMinutes(currentTime, driveTime),
-        duration: driveTime,
-        distance: segmentDistance,
+        arrivalTime: segArrival,
+        arrivalTimeEarly: segArrivalEarly,
+        arrivalTimeLate: segArrivalLate,
+        duration: seg.duration,
+        distance: Math.round(seg.distance),
+        segmentIndex: segIndex + 1,
+        segmentTotal: drivingSegments.length,
       });
-    }
 
-    currentTime = addMinutes(currentTime, driveTime);
-    if (driveTime >= 120 && checkpoint.type !== 'lunch') {
-      currentTime = addMinutes(currentTime, 15);
-    }
+      currentTime = segArrival;
+      currentDistance += seg.distance;
+
+      const isLastSegmentOfThisCP = segIndex === drivingSegments.length - 1;
+      if (!isLastSegmentOfThisCP) {
+        restCounter++;
+        const restDeparture = addMinutes(currentTime, REST_DURATION);
+        nodes.push({
+          id: `node-rest-${Date.now()}-${restCounter}`,
+          type: 'rest',
+          name: `临时休息点 ${restCounter}`,
+          arrivalTime: currentTime,
+          arrivalTimeEarly: addMinutes(currentTime, -5),
+          arrivalTimeLate: addMinutes(currentTime, 10),
+          departureTime: restDeparture,
+          duration: REST_DURATION,
+          distance: Math.round(currentDistance),
+          notes: '建议休息15分钟，活动身体、检查车况、人员轮换驾驶',
+        });
+        currentTime = restDeparture;
+      }
+    });
 
     const nodeTypeMap: Record<string, RouteNode['type']> = {
       scenic: 'scenic',
@@ -95,19 +130,24 @@ export function generateNodes(activity: Activity): RouteNode[] {
       lunch: 'lunch',
       other: 'supply',
     };
+    const cpDeparture = addMinutes(currentTime, checkpoint.stayDuration);
+    const cpArrivalEarly = addMinutes(currentTime, -ARRIVAL_VARIANCE_MINUTES);
+    const cpArrivalLate = addMinutes(currentTime, ARRIVAL_VARIANCE_MINUTES);
 
     nodes.push({
       id: `node-checkpoint-${checkpoint.id}`,
       type: nodeTypeMap[checkpoint.type] || 'supply',
       name: checkpoint.name,
       arrivalTime: currentTime,
-      departureTime: addMinutes(currentTime, checkpoint.stayDuration),
+      arrivalTimeEarly: cpArrivalEarly,
+      arrivalTimeLate: cpArrivalLate,
+      departureTime: cpDeparture,
       duration: checkpoint.stayDuration,
       distance: checkpoint.distance,
       notes: checkpoint.notes,
     });
 
-    currentTime = addMinutes(currentTime, checkpoint.stayDuration);
+    currentTime = cpDeparture;
     lastDistance = checkpoint.distance;
   });
 
@@ -120,12 +160,12 @@ export function generateNodes(activity: Activity): RouteNode[] {
     type: 'accommodation',
     name: `住宿酒店（预算 ¥${activity.accommodationBudget}/间）`,
     arrivalTime: currentTime,
+    arrivalTimeEarly: addMinutes(currentTime, -ARRIVAL_VARIANCE_MINUTES),
+    arrivalTimeLate: addMinutes(currentTime, ARRIVAL_VARIANCE_MINUTES * 2),
     duration: 0,
     distance: totalDistance,
     notes: '抵达后办理入住，晚餐自由安排',
   });
-
-  currentDistance = totalDistance;
 
   return nodes;
 }
@@ -147,4 +187,4 @@ export function generateRadioChannel(index: number): string {
   return channels[index % channels.length];
 }
 
-export { parseTime, formatTime, addMinutes, calculateDriveTime };
+export { parseTime, formatTime, addMinutes, calculateDriveTime, MAX_DRIVE_SEGMENT_MINUTES };

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { analyzeMembers } from '@/utils/analyzer';
-import { Member, DrivingExperience, MemberStatus } from '@/types';
+import { Member, DrivingExperience, MemberStatus, SuggestedStop } from '@/types';
 import {
   Users,
   Plus,
@@ -18,6 +18,14 @@ import {
   Radio,
   Phone,
   Clock,
+  Upload,
+  FileText,
+  Fuel,
+  Coffee,
+  Camera,
+  ChevronRight,
+  CheckCircle2,
+  Download,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -33,6 +41,12 @@ const statusLabels: Record<MemberStatus, { label: string; color: string }> = {
   cancelled: { label: '已取消', color: 'text-slate-400 bg-slate-100' },
 };
 
+const suggestedStopIcon = {
+  rest: Coffee,
+  supply: Fuel,
+  scenic: Camera,
+};
+
 interface MemberFormData {
   name: string;
   phone: string;
@@ -46,9 +60,13 @@ interface MemberFormData {
 }
 
 export default function MembersPage() {
-  const { activity, members, addMember, removeMember, updateMember, assignCarNumbers } = useAppStore();
+  const { activity, members, addMember, removeMember, updateMember, assignCarNumbers, batchAddMembers, adoptSuggestedStop } = useAppStore();
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showBatchForm, setShowBatchForm] = useState(false);
   const [filterStatus, setFilterStatus] = useState<'all' | MemberStatus>('all');
+  const [batchText, setBatchText] = useState('');
+  const [batchError, setBatchError] = useState('');
+  const [adoptedIds, setAdoptedIds] = useState<Set<string>>(new Set());
   const [newMember, setNewMember] = useState<MemberFormData>({
     name: '',
     phone: '',
@@ -101,10 +119,90 @@ export default function MembersPage() {
     setShowAddForm(false);
   };
 
+  const parseBatchText = (text: string): Omit<Member, 'id'>[] => {
+    const lines = text.trim().split('\n').filter((l) => l.trim());
+    const result: Omit<Member, 'id'>[] = [];
+    let lineIdx = 0;
+
+    for (const line of lines) {
+      lineIdx++;
+      const parts = line.split(/[,，\t|]/).map((s) => s.trim()).filter(Boolean);
+      if (parts.length < 3) {
+        throw new Error(`第 ${lineIdx} 行格式错误，至少需要：姓名,车型,续航`);
+      }
+      const [name, carModel, rangeStr, ...rest] = parts;
+      const range = parseInt(rangeStr, 10);
+      if (!name || !carModel || isNaN(range)) {
+        throw new Error(`第 ${lineIdx} 行数据不完整：姓名、车型、续航(数字)必填`);
+      }
+
+      let experience: DrivingExperience = 'intermediate';
+      let phone = '';
+      let carColor = '';
+      let hasElderly = false;
+      let hasChildren = false;
+      let willingTail = false;
+
+      for (const token of rest) {
+        const t = token.toLowerCase();
+        if (t === '新手' || t === 'novice') experience = 'novice';
+        else if (t === '熟练' || t === 'intermediate') experience = 'intermediate';
+        else if (t === '老司机' || t === 'expert') experience = 'expert';
+        else if (t.includes('老') || t === 'elderly') hasElderly = true;
+        else if (t.includes('孩') || t.includes('儿童') || t === 'children') hasChildren = true;
+        else if (t.includes('尾') || t === 'tail') willingTail = true;
+        else if (/^\d{3,}$/.test(token)) phone = token;
+        else if (token.length <= 4 && !/^\d+$/.test(token)) carColor = token;
+      }
+
+      result.push({
+        name,
+        carModel,
+        carColor,
+        phone,
+        range,
+        drivingExperience: experience,
+        hasElderly,
+        hasChildren,
+        willingTail,
+        status: 'confirmed',
+      });
+    }
+
+    return result;
+  };
+
+  const handleBatchImport = () => {
+    try {
+      setBatchError('');
+      const parsed = parseBatchText(batchText);
+      if (parsed.length === 0) {
+        setBatchError('未解析出有效数据');
+        return;
+      }
+      batchAddMembers(parsed);
+      setBatchText('');
+      setShowBatchForm(false);
+    } catch (err: any) {
+      setBatchError(err.message || '解析失败，请检查格式');
+    }
+  };
+
+  const handleAdoptStop = (stop: SuggestedStop) => {
+    adoptSuggestedStop(stop);
+    setAdoptedIds((prev) => new Set(prev).add(stop.id));
+  };
+
   const riskLevelConfig = {
     low: { color: 'bg-emerald-500', label: '低风险', textColor: 'text-emerald-600', bgColor: 'bg-emerald-50' },
     medium: { color: 'bg-amber-500', label: '中风险', textColor: 'text-amber-600', bgColor: 'bg-amber-50' },
     high: { color: 'bg-red-500', label: '高风险', textColor: 'text-red-600', bgColor: 'bg-red-50' },
+  };
+
+  const priorityConfig = {
+    high: { color: 'text-red-600', bgColor: 'bg-red-50 border-red-200', label: '强烈建议' },
+    medium: { color: 'text-amber-600', bgColor: 'bg-amber-50 border-amber-200', label: '建议' },
+    low: { color: 'text-slate-600', bgColor: 'bg-slate-50 border-slate-200', label: '可选' },
   };
 
   return (
@@ -140,6 +238,13 @@ export default function MembersPage() {
                   ))}
                 </div>
                 <button
+                  onClick={() => setShowBatchForm(true)}
+                  className="flex items-center gap-2 px-4 py-2 border border-slate-300 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-50 transition-colors"
+                >
+                  <Upload className="w-4 h-4" />
+                  批量导入
+                </button>
+                <button
                   onClick={() => setShowAddForm(true)}
                   className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 transition-colors"
                 >
@@ -149,6 +254,71 @@ export default function MembersPage() {
               </div>
             </div>
 
+            {showBatchForm && (
+              <div className="mb-6 p-5 bg-slate-50 rounded-lg border border-slate-200">
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="font-medium text-slate-800 flex items-center gap-2">
+                    <Upload className="w-4 h-4 text-teal-600" />
+                    批量导入成员
+                  </h4>
+                  <button onClick={() => { setShowBatchForm(false); setBatchError(''); setBatchText(''); }} className="text-slate-400 hover:text-slate-600">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="bg-white rounded-md p-3 border border-slate-200 text-xs text-slate-600 mb-3 space-y-1">
+                  <p className="font-medium text-slate-700">格式说明（每行一个成员，逗号或 Tab 分隔）：</p>
+                  <p>
+                    <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono">姓名,车型,续航(km),驾驶经验,手机,颜色,老人,孩子,尾车</code>
+                  </p>
+                  <p className="text-slate-500">
+                    示例：<code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono">张伟,丰田普拉多,800,老司机,138****1234,白色,,孩子,</code>
+                  </p>
+                  <p className="text-slate-500">
+                    驾驶经验可选值：新手 / 熟练 / 老司机；老人、孩子、尾车填任意非空值即视为是
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setBatchText(`张伟,丰田普拉多,800,老司机,13800138000,白色,是,,\n王强,特斯拉Model Y,450,新手,13900139000,银色,,,\n刘芳,大众途观L,700,熟练,13700137000,棕色,老人,孩子,`)}
+                    className="text-teal-600 hover:text-teal-700 text-xs font-medium mt-1 inline-flex items-center gap-1"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    载入示例
+                  </button>
+                </div>
+
+                <textarea
+                  value={batchText}
+                  onChange={(e) => setBatchText(e.target.value)}
+                  rows={6}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  placeholder="按格式粘贴成员信息，每行一位..."
+                />
+
+                {batchError && (
+                  <p className="text-sm text-red-600 mt-2 flex items-center gap-1">
+                    <AlertTriangle className="w-4 h-4" />
+                    {batchError}
+                  </p>
+                )}
+
+                <div className="flex gap-2 mt-4">
+                  <button
+                    onClick={handleBatchImport}
+                    className="px-4 py-2 bg-teal-600 text-white text-sm rounded-md hover:bg-teal-700 transition-colors"
+                  >
+                    确认导入
+                  </button>
+                  <button
+                    onClick={() => { setShowBatchForm(false); setBatchError(''); setBatchText(''); }}
+                    className="px-4 py-2 bg-white text-slate-600 text-sm rounded-md border border-slate-300 hover:bg-slate-50 transition-colors"
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            )}
+
             {showAddForm && (
               <div className="mb-6 p-5 bg-slate-50 rounded-lg border border-slate-200">
                 <div className="flex items-center justify-between mb-4">
@@ -156,10 +326,7 @@ export default function MembersPage() {
                     <UserPlus className="w-4 h-4 text-teal-600" />
                     添加新成员
                   </h4>
-                  <button
-                    onClick={() => setShowAddForm(false)}
-                    className="text-slate-400 hover:text-slate-600"
-                  >
+                  <button onClick={() => setShowAddForm(false)} className="text-slate-400 hover:text-slate-600">
                     <X className="w-5 h-5" />
                   </button>
                 </div>
@@ -286,7 +453,7 @@ export default function MembersPage() {
             )}
 
             <div className="space-y-3">
-              {filteredMembers.map((member, index) => {
+              {filteredMembers.map((member) => {
                 const expConfig = experienceLabels[member.drivingExperience];
                 const statusConfig = statusLabels[member.status];
 
@@ -301,7 +468,7 @@ export default function MembersPage() {
                           {member.name.charAt(0)}
                         </div>
                         <div className="flex-1">
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-3 flex-wrap">
                             <h4 className="font-semibold text-slate-800">{member.name}</h4>
                             <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium', expConfig.color)}>
                               {expConfig.label}
@@ -315,7 +482,7 @@ export default function MembersPage() {
                               </span>
                             )}
                           </div>
-                          <div className="flex items-center gap-4 mt-2 text-sm text-slate-500">
+                          <div className="flex items-center gap-4 mt-2 text-sm text-slate-500 flex-wrap">
                             <span className="flex items-center gap-1">
                               <Car className="w-4 h-4" />
                               {member.carModel}
@@ -332,7 +499,7 @@ export default function MembersPage() {
                               </span>
                             )}
                           </div>
-                          <div className="flex items-center gap-3 mt-2">
+                          <div className="flex items-center gap-3 mt-2 flex-wrap">
                             {member.hasElderly && (
                               <span className="text-xs text-slate-500 flex items-center gap-1">
                                 <Shield className="w-3.5 h-3.5" />
@@ -428,7 +595,7 @@ export default function MembersPage() {
               </div>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2 mb-5">
               <p className="text-sm font-medium text-slate-700 mb-3">建议提醒</p>
               {analysis.restSuggestions.map((suggestion, index) => (
                 <div
@@ -446,6 +613,91 @@ export default function MembersPage() {
                 </div>
               ))}
             </div>
+
+            {analysis.suggestedStops.length > 0 && (
+              <div className="pt-4 border-t border-slate-100">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-medium text-slate-700">建议停靠点</p>
+                  <span className="text-xs text-slate-400">点击采纳加入路书</span>
+                </div>
+                <div className="space-y-2">
+                  {analysis.suggestedStops.map((stop) => {
+                    const StopIcon = suggestedStopIcon[stop.type];
+                    const priorityCfg = priorityConfig[stop.priority];
+                    const isAdopted = adoptedIds.has(stop.id);
+
+                    return (
+                      <div
+                        key={stop.id}
+                        className={cn(
+                          'p-3 rounded-lg border transition-all',
+                          isAdopted
+                            ? 'bg-emerald-50 border-emerald-200'
+                            : priorityCfg.bgColor
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-2 min-w-0">
+                            <div className={cn(
+                              'w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0',
+                              stop.type === 'rest' ? 'bg-amber-100 text-amber-600'
+                                : stop.type === 'supply' ? 'bg-blue-100 text-blue-600'
+                                  : 'bg-emerald-100 text-emerald-600'
+                            )}>
+                              <StopIcon className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className={cn('text-sm font-medium', priorityCfg.color)}>
+                                  {stop.name}
+                                </span>
+                                <span className={cn(
+                                  'text-xs px-1.5 py-0.5 rounded-full',
+                                  stop.type === 'rest' ? 'bg-amber-100 text-amber-600'
+                                    : stop.type === 'supply' ? 'bg-blue-100 text-blue-600'
+                                      : 'bg-emerald-100 text-emerald-600'
+                                )}>
+                                  {stop.type === 'rest' ? '休息' : stop.type === 'supply' ? '补给' : '景区'}
+                                </span>
+                                <span className="text-xs text-slate-400">
+                                  {priorityCfg.label}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-500 mt-1">
+                                里程 {stop.distance}km · 停留 {stop.duration} 分钟
+                              </p>
+                              <p className="text-xs text-slate-500 mt-0.5">{stop.reason}</p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => handleAdoptStop(stop)}
+                            disabled={isAdopted}
+                            className={cn(
+                              'flex-shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors',
+                              isAdopted
+                                ? 'bg-emerald-100 text-emerald-600 cursor-default'
+                                : 'bg-teal-600 text-white hover:bg-teal-700'
+                            )}
+                          >
+                            {isAdopted ? (
+                              <>
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                已采纳
+                              </>
+                            ) : (
+                              <>
+                                <ChevronRight className="w-3.5 h-3.5" />
+                                采纳
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
@@ -464,6 +716,16 @@ export default function MembersPage() {
               <p className="text-xs text-slate-400 text-center">
                 系统将根据驾驶经验自动排序，经验丰富者在前
               </p>
+              <button
+                onClick={() => {
+                  const link = `${window.location.origin}${window.location.pathname.replace(/\/[^/]*$/, '')}/view?code=${useAppStore.getState().roadbook.shareCode || ''}`;
+                  navigator.clipboard?.writeText(link).catch(() => {});
+                }}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 border border-slate-200 text-slate-700 text-sm rounded-lg hover:bg-slate-50 transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                复制成员查看链接
+              </button>
             </div>
           </div>
         </div>

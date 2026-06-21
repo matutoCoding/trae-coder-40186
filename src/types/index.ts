@@ -29,10 +29,24 @@ export interface RouteNode {
   type: NodeType;
   name: string;
   arrivalTime?: string;
+  arrivalTimeEarly?: string;
+  arrivalTimeLate?: string;
   departureTime?: string;
   duration: number;
   distance?: number;
   notes?: string;
+  segmentIndex?: number;
+  segmentTotal?: number;
+}
+
+export interface SuggestedStop {
+  id: string;
+  type: 'rest' | 'supply' | 'scenic';
+  distance: number;
+  reason: string;
+  duration: number;
+  name: string;
+  priority: 'high' | 'medium' | 'low';
 }
 
 export type DrivingExperience = 'novice' | 'intermediate' | 'expert';
@@ -79,4 +93,5 @@ export interface AnalysisResult {
   riskLevel: 'low' | 'medium' | 'high';
   totalDistance: number;
   estimatedDriveTime: number;
+  suggestedStops: SuggestedStop[];
 }

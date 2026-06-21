@@ -23,6 +23,7 @@ export default function RoadbookPage() {
   const { activity, members, roadbook, updateRoadbook, publishRoadbook } = useAppStore();
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
   const [showRules, setShowRules] = useState(true);
   const [editingRule, setEditingRule] = useState<number | null>(null);
   const [newRule, setNewRule] = useState('');
@@ -39,6 +40,13 @@ export default function RoadbookPage() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
+  };
+
+  const handleCopyShareLink = () => {
+    const link = `${window.location.origin}${window.location.pathname.replace(/\/[^/]*$/, '')}/view?code=${roadbook.shareCode || ''}`;
+    navigator.clipboard.writeText(link);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
   };
 
   const handleAddRule = () => {
@@ -109,17 +117,39 @@ export default function RoadbookPage() {
                     已发布
                   </div>
                   {roadbook.shareCode && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-slate-400">分享码：</span>
-                      <code className="px-3 py-1.5 bg-slate-700 rounded-lg text-sm font-mono text-teal-400">
-                        {roadbook.shareCode}
-                      </code>
-                      <button
-                        onClick={handleCopyShareCode}
-                        className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors"
-                      >
-                        {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-                      </button>
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-slate-400">分享码：</span>
+                        <code className="px-3 py-1.5 bg-slate-700 rounded-lg text-sm font-mono text-teal-400">
+                          {roadbook.shareCode}
+                        </code>
+                        <button
+                          onClick={handleCopyShareCode}
+                          className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors"
+                          title="复制分享码"
+                        >
+                          {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-slate-400">成员链接：</span>
+                        <button
+                          onClick={handleCopyShareLink}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-xs font-medium transition-colors"
+                        >
+                          {copiedLink ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              已复制链接
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5" />
+                              复制成员查看链接
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>

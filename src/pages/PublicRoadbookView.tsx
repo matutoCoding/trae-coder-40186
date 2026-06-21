@@ -60,6 +60,7 @@ export default function PublicRoadbookView() {
   const [showRules, setShowRules] = useState(true);
   const [showSchedule, setShowSchedule] = useState(true);
   const [codeError, setCodeError] = useState('');
+  const [hasNoLocalData, setHasNoLocalData] = useState(false);
 
   useEffect(() => {
     if (urlToken) {
@@ -73,6 +74,7 @@ export default function PublicRoadbookView() {
         });
         setExternalDecodeError(null);
         setVerified(true);
+        setHasNoLocalData(false);
       } else {
         setExternalDecodeError('链接无效或已损坏，请尝试使用分享码方式进入');
       }
@@ -81,11 +83,14 @@ export default function PublicRoadbookView() {
 
   useEffect(() => {
     if (!externalData && urlCode && !verified) {
-      if (urlCode === roadbook.shareCode) {
+      if (roadbook.published && roadbook.shareCode && urlCode.toUpperCase() === roadbook.shareCode.toUpperCase()) {
         setVerified(true);
+        setHasNoLocalData(false);
+      } else if (!roadbook.published || !roadbook.shareCode) {
+        setHasNoLocalData(true);
       }
     }
-  }, [urlCode, roadbook.shareCode, verified, externalData]);
+  }, [urlCode, roadbook.shareCode, roadbook.published, verified, externalData]);
 
   const effectiveActivity = externalData?.activity ?? activity;
   const effectiveMembers = externalData?.members ?? members;
@@ -95,11 +100,18 @@ export default function PublicRoadbookView() {
   const confirmedMembers = effectiveMembers.filter((m) => m.status === 'confirmed');
 
   const handleVerify = () => {
-    if (codeInput.toUpperCase() === effectiveRoadbook.shareCode) {
+    if (!effectiveRoadbook.published || !effectiveRoadbook.shareCode) {
+      setHasNoLocalData(true);
+      setCodeError('');
+      return;
+    }
+    if (codeInput.toUpperCase() === effectiveRoadbook.shareCode.toUpperCase()) {
       setVerified(true);
       setCodeError('');
+      setHasNoLocalData(false);
     } else {
       setCodeError('分享码不正确，请确认后重试');
+      setHasNoLocalData(false);
     }
   };
 
@@ -134,10 +146,10 @@ export default function PublicRoadbookView() {
             <Car className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-2xl font-bold text-slate-800 text-center mb-2">
-            {effectiveActivity.name}
+            车队路书
           </h1>
           <p className="text-sm text-slate-500 text-center mb-6">
-            请输入领队分享的 6 位分享码查看您的专属路书
+            请输入领队分享的 6 位分享码，或使用领队发送的完整跨设备链接直接进入
           </p>
 
           {externalDecodeError && (
@@ -149,13 +161,28 @@ export default function PublicRoadbookView() {
             </div>
           )}
 
+          {hasNoLocalData && (
+            <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+              <p className="text-sm font-medium text-amber-800 flex items-start gap-2 mb-1.5">
+                <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                当前设备没有这份路书
+              </p>
+              <p className="text-xs text-amber-700 leading-relaxed">
+                6 位分享码只能在<strong>领队发布时那台电脑</strong>上使用。如需在手机或其它设备查看，请让领队点击<strong>「复制跨设备分享链接」</strong>后发送给您，完整链接内包含了全部路书数据。
+              </p>
+            </div>
+          )}
+
           <div className="space-y-3">
             <div>
               <label className="text-xs font-medium text-slate-600 mb-1.5 block">分享码</label>
               <input
                 type="text"
                 value={codeInput}
-                onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
+                onChange={(e) => {
+                  setCodeInput(e.target.value.toUpperCase());
+                  setHasNoLocalData(false);
+                }}
                 onKeyDown={(e) => e.key === 'Enter' && handleVerify()}
                 maxLength={6}
                 placeholder="例如：ABC123"
@@ -176,9 +203,10 @@ export default function PublicRoadbookView() {
             </button>
           </div>
 
-          <div className="mt-6 pt-6 border-t border-slate-100 text-center text-xs text-slate-400">
-            <p>活动日期：{effectiveActivity.date}</p>
-            <p className="mt-1">集合时间：{effectiveActivity.meetingTime} · {effectiveActivity.meetingPoint}</p>
+          <div className="mt-6 pt-6 border-t border-slate-100 text-center text-xs text-slate-400 space-y-1">
+            <p className="text-slate-500 font-medium">💡 小贴士</p>
+            <p>跨设备查看请使用领队发送的完整链接（URL 含 token 参数）</p>
+            <p>链接内包含所有活动和成员数据，无需联网即可打开</p>
           </div>
         </div>
       </div>
@@ -364,9 +392,9 @@ export default function PublicRoadbookView() {
           currentSignRecord?.status === 'quit' && 'bg-red-50 border-red-200',
           (!currentSignRecord || currentSignRecord.status === 'not_arrived') && 'bg-slate-50 border-slate-200'
         )}>
-          <div className="flex items-center gap-3">
+          <div className="flex items-start gap-3">
             <div className={cn(
-              'w-10 h-10 rounded-xl flex items-center justify-center',
+              'w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0',
               currentSignRecord?.status === 'arrived' && 'bg-emerald-100',
               currentSignRecord?.status === 'late' && 'bg-amber-100',
               currentSignRecord?.status === 'quit' && 'bg-red-100',
@@ -377,7 +405,7 @@ export default function PublicRoadbookView() {
               {currentSignRecord?.status === 'quit' && <AlertCircle className="w-5 h-5 text-red-600" />}
               {(!currentSignRecord || currentSignRecord.status === 'not_arrived') && <MapPin className="w-5 h-5 text-slate-500" />}
             </div>
-            <div className="flex-1">
+            <div className="flex-1 min-w-0">
               <p className={cn(
                 'text-sm font-semibold',
                 currentSignRecord?.status === 'arrived' && 'text-emerald-700',
@@ -390,19 +418,36 @@ export default function PublicRoadbookView() {
                 {currentSignRecord?.status === 'quit' && '临时退出'}
                 {(!currentSignRecord || currentSignRecord.status === 'not_arrived') && '未到达'}
               </p>
-              <p className={cn(
-                'text-xs mt-0.5',
+              <div className={cn(
+                'text-xs mt-0.5 space-y-1',
                 currentSignRecord?.status === 'arrived' && 'text-emerald-600',
-                currentSignRecord?.status === 'late' && 'text-amber-600',
+                currentSignRecord?.status === 'late' && 'text-amber-700',
                 currentSignRecord?.status === 'quit' && 'text-red-600',
                 (!currentSignRecord || currentSignRecord.status === 'not_arrived') && 'text-slate-500'
               )}>
-                {(currentSignRecord?.status === 'arrived' || currentSignRecord?.status === 'late') && currentSignRecord.signedAt
-                  ? `签到时间：${formatSignTime(currentSignRecord.signedAt)}`
-                  : !currentSignRecord || currentSignRecord.status === 'not_arrived'
-                    ? '请前往集合点按车号签到'
-                    : currentSignRecord.remark || '已退出本次活动'}
-              </p>
+                {!currentSignRecord || currentSignRecord.status === 'not_arrived' ? (
+                  <p>请前往集合点按车号签到</p>
+                ) : (
+                  <>
+                    {(currentSignRecord.status === 'arrived' || currentSignRecord.status === 'late') && currentSignRecord.signedAt && (
+                      <p>⏰ 签到时间：{formatSignTime(currentSignRecord.signedAt)}</p>
+                    )}
+                    {currentSignRecord.remark && (
+                      <p className={cn(
+                        'font-medium pt-1',
+                        currentSignRecord.status === 'late' && 'text-amber-800',
+                        currentSignRecord.status === 'quit' && 'text-red-800',
+                        currentSignRecord.status === 'arrived' && 'text-emerald-800'
+                      )}>
+                        📝 {currentSignRecord.remark}
+                      </p>
+                    )}
+                    {currentSignRecord.status === 'quit' && !currentSignRecord.remark && (
+                      <p>已退出本次活动</p>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           </div>
         </div>

@@ -26,7 +26,7 @@ import { buildShareLink } from '@/utils/shareCodec';
 import { openOfflinePrintableRoadbook } from '@/utils/exportRoadbook';
 
 export default function RoadbookPage() {
-  const { activity, members, roadbook, updateRoadbook, publishRoadbook, fillMissingAssignments, signRecords } = useAppStore();
+  const { activity, members, roadbook, updateRoadbook, publishRoadbook, previewMissingAssignments, applyMissingAssignments, signRecords } = useAppStore();
   const navigate = useNavigate();
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -36,7 +36,7 @@ export default function RoadbookPage() {
   const [editingRule, setEditingRule] = useState<number | null>(null);
   const [newRule, setNewRule] = useState('');
   const [showPublishPreview, setShowPublishPreview] = useState(false);
-  const [publishPrep, setPublishPrep] = useState<{ assignedNumbers: string[]; assignedChannels: string[]; missingBefore: { noNumber: string[]; noChannel: string[] } } | null>(null);
+  const [publishPrep, setPublishPrep] = useState<ReturnType<typeof previewMissingAssignments> | null>(null);
 
   const confirmedMembers = members.filter((m) => m.status === 'confirmed');
 
@@ -67,14 +67,13 @@ export default function RoadbookPage() {
   };
 
   const handlePreparePublish = () => {
-    const noNumber = confirmedMembers.filter((m) => !m.carNumber).map((m) => m.name);
-    const noChannel = confirmedMembers.filter((m) => !m.radioChannel).map((m) => m.name);
-    const result = fillMissingAssignments();
-    setPublishPrep({ ...result, missingBefore: { noNumber, noChannel } });
+    const preview = previewMissingAssignments();
+    setPublishPrep(preview);
     setShowPublishPreview(true);
   };
 
   const handleConfirmPublish = () => {
+    applyMissingAssignments();
     publishRoadbook();
     setShowPublishPreview(false);
   };
@@ -595,7 +594,7 @@ export default function RoadbookPage() {
                       <p className="text-xs font-medium text-teal-700 mb-2">车号分配：</p>
                       <ul className="space-y-1 text-sm text-teal-800">
                         {publishPrep.assignedNumbers.slice(0, 8).map((item, i) => (
-                          <li key={i}>{item}</li>
+                          <li key={i}>{item.name} → {item.carNumber}号车</li>
                         ))}
                         {publishPrep.assignedNumbers.length > 8 && (
                           <li className="text-teal-600">...还有 {publishPrep.assignedNumbers.length - 8} 条</li>
@@ -608,7 +607,7 @@ export default function RoadbookPage() {
                       <p className="text-xs font-medium text-blue-700 mb-2">频道分配：</p>
                       <ul className="space-y-1 text-sm text-blue-800">
                         {publishPrep.assignedChannels.slice(0, 8).map((item, i) => (
-                          <li key={i}>{item}</li>
+                          <li key={i}>{item.name} → {item.radioChannel}</li>
                         ))}
                         {publishPrep.assignedChannels.length > 8 && (
                           <li className="text-blue-600">...还有 {publishPrep.assignedChannels.length - 8} 条</li>
@@ -621,7 +620,7 @@ export default function RoadbookPage() {
 
               <div>
                 <h3 className="text-sm font-semibold text-slate-700 mb-3">
-                  最终编组概览（{convoyMembers.length} 位已确认成员）
+                  最终编组概览（{publishPrep.updatedConvoyOrder.length} 位已确认成员）
                 </h3>
                 <div className="border border-slate-200 rounded-xl overflow-hidden">
                   <table className="w-full text-sm">
@@ -634,7 +633,8 @@ export default function RoadbookPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {convoyMembers.map((member) => {
+                      {publishPrep.updatedConvoyOrder.map((mid) => {
+                        const member = publishPrep.updatedMembers.find((m) => m.id === mid);
                         if (!member) return null;
                         return (
                           <tr key={member.id} className="hover:bg-slate-50">

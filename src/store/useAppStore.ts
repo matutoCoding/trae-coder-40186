@@ -71,7 +71,14 @@ interface AppState {
   updateMember: (id: string, updates: Partial<Member>) => void;
   removeMember: (id: string) => void;
   batchAddMembers: (membersData: Omit<Member, 'id'>[]) => void;
-  fillMissingAssignments: () => { assignedNumbers: string[]; assignedChannels: string[] };
+  previewMissingAssignments: () => {
+    assignedNumbers: { memberId: string; name: string; carNumber: number }[];
+    assignedChannels: { memberId: string; name: string; radioChannel: string }[];
+    missingBefore: { noNumber: string[]; noChannel: string[] };
+    updatedMembers: Member[];
+    updatedConvoyOrder: string[];
+  };
+  applyMissingAssignments: () => { assignedNumbers: string[]; assignedChannels: string[] };
 
   updateRoadbook: (updates: Partial<Roadbook>) => void;
   publishRoadbook: () => void;
@@ -220,55 +227,70 @@ export const useAppStore = create<AppState>((set, get) => ({
     get()._persist();
   },
 
-  fillMissingAssignments: () => {
-    const assignedNumbers: string[] = [];
-    const assignedChannels: string[] = [];
-    set((state) => {
-      const confirmedMembers = state.members
-        .filter((m) => m.status === 'confirmed')
-        .sort((a, b) => {
-          if (a.drivingExperience === 'expert' && b.drivingExperience !== 'expert') return -1;
-          if (a.drivingExperience !== 'expert' && b.drivingExperience === 'expert') return 1;
-          if (a.willingTail && !b.willingTail) return 1;
-          if (!a.willingTail && b.willingTail) return -1;
-          return 0;
-        });
-
-      let maxCarNum = 0;
-      state.members.forEach((m) => {
-        if (typeof m.carNumber === 'number' && m.carNumber > maxCarNum) maxCarNum = m.carNumber;
+  previewMissingAssignments: () => {
+    const state = get();
+    const confirmedMembers = state.members
+      .filter((m) => m.status === 'confirmed')
+      .sort((a, b) => {
+        if (a.drivingExperience === 'expert' && b.drivingExperience !== 'expert') return -1;
+        if (a.drivingExperience !== 'expert' && b.drivingExperience === 'expert') return 1;
+        if (a.willingTail && !b.willingTail) return 1;
+        if (!a.willingTail && b.willingTail) return -1;
+        return 0;
       });
 
-      const updatedMembers = state.members.map((m) => {
-        if (m.status !== 'confirmed') return m;
-        const idx = confirmedMembers.findIndex((cm) => cm.id === m.id);
-        const newCarNumber =
-          typeof m.carNumber === 'number' ? m.carNumber : (maxCarNum = maxCarNum + 1);
-        const newChannel =
-          m.radioChannel && m.radioChannel.trim()
-            ? m.radioChannel
-            : `CH${Math.floor(idx / 3) + 1}`;
-        if (typeof m.carNumber !== 'number') assignedNumbers.push(`${m.name} → ${newCarNumber}号车`);
-        if (!m.radioChannel) assignedChannels.push(`${m.name} → ${newChannel}`);
-        return {
-          ...m,
-          carNumber: newCarNumber,
-          radioChannel: newChannel,
-        };
-      });
+    let maxCarNum = 0;
+    state.members.forEach((m) => {
+      if (typeof m.carNumber === 'number' && m.carNumber > maxCarNum) maxCarNum = m.carNumber;
+    });
 
-      const convoyOrder = confirmedMembers.map((m) => m.id);
+    const assignedNumbers: { memberId: string; name: string; carNumber: number }[] = [];
+    const assignedChannels: { memberId: string; name: string; radioChannel: string }[] = [];
+    const missingBefore = {
+      noNumber: state.members.filter((m) => m.status === 'confirmed' && typeof m.carNumber !== 'number').map((m) => m.name),
+      noChannel: state.members.filter((m) => m.status === 'confirmed' && !m.radioChannel).map((m) => m.name),
+    };
 
+    const updatedMembers = state.members.map((m) => {
+      if (m.status !== 'confirmed') return m;
+      const idx = confirmedMembers.findIndex((cm) => cm.id === m.id);
+      let newCarNumber = m.carNumber as number | undefined;
+      let newChannel = m.radioChannel;
+      if (typeof newCarNumber !== 'number') {
+        maxCarNum = maxCarNum + 1;
+        newCarNumber = maxCarNum;
+        assignedNumbers.push({ memberId: m.id, name: m.name, carNumber: newCarNumber });
+      }
+      if (!newChannel || !newChannel.trim()) {
+        newChannel = `CH${Math.floor(idx / 3) + 1}`;
+        assignedChannels.push({ memberId: m.id, name: m.name, radioChannel: newChannel });
+      }
       return {
-        members: updatedMembers,
-        roadbook: {
-          ...state.roadbook,
-          convoyOrder,
-        },
+        ...m,
+        carNumber: newCarNumber,
+        radioChannel: newChannel,
       };
     });
+
+    const updatedConvoyOrder = confirmedMembers.map((m) => m.id);
+
+    return { assignedNumbers, assignedChannels, missingBefore, updatedMembers, updatedConvoyOrder };
+  },
+
+  applyMissingAssignments: () => {
+    const preview = get().previewMissingAssignments();
+    set({
+      members: preview.updatedMembers,
+      roadbook: {
+        ...get().roadbook,
+        convoyOrder: preview.updatedConvoyOrder,
+      },
+    });
     get()._persist();
-    return { assignedNumbers, assignedChannels };
+    return {
+      assignedNumbers: preview.assignedNumbers.map((a) => `${a.name} → ${a.carNumber}号车`),
+      assignedChannels: preview.assignedChannels.map((a) => `${a.name} → ${a.radioChannel}`),
+    };
   },
 
   updateRoadbook: (updates) => {

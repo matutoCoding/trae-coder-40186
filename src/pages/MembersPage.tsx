@@ -131,13 +131,30 @@ export default function MembersPage() {
     return false;
   };
 
+  const NEGATIVE_PREFIX = /^(无|没|不|否|非)/;
+  const POSITIVE_PREFIX = /^(有|带|携|是)/;
+
   const parseBooleanField = (token: string, keywords: RegExp): boolean => {
-    const t = token.toLowerCase();
-    const hasKeyword = keywords.test(t);
-    if (!hasKeyword) return false;
-    const remaining = token.replace(keywords, '').trim();
-    if (!remaining) return true;
-    return parseBoolean(remaining);
+    const t = token.trim();
+    if (!t) return false;
+    const lowerT = t.toLowerCase();
+
+    const kwMatch = t.match(keywords) || lowerT.match(keywords);
+    if (!kwMatch) return false;
+
+    const withoutKw = t.replace(keywords, '').replace(lowerT.match(keywords) ? new RegExp(keywords.source, keywords.flags) : '', '').trim();
+
+    if (!withoutKw) {
+      if (NEGATIVE_PREFIX.test(t)) return false;
+      if (POSITIVE_PREFIX.test(t)) return true;
+      return true;
+    }
+
+    const negMatch = t.match(NEGATIVE_PREFIX);
+    if (negMatch && !withoutKw) return false;
+    if (POSITIVE_PREFIX.test(t) && !withoutKw) return true;
+
+    return parseBoolean(withoutKw);
   };
 
   const parseBatchText = (text: string): { members: Omit<Member, 'id'>[]; errors: string[] } => {
@@ -145,6 +162,14 @@ export default function MembersPage() {
     const members: Omit<Member, 'id'>[] = [];
     const errors: string[] = [];
     let lineIdx = 0;
+
+    const isKeywordOnly = (token: string, keywords: RegExp): boolean => {
+      const t = token.trim();
+      if (!t) return false;
+      const stripped = t.replace(NEGATIVE_PREFIX, '').replace(POSITIVE_PREFIX, '').trim();
+      if (!stripped) return keywords.test(t.toLowerCase());
+      return keywords.test(t.toLowerCase()) && parseBoolean(stripped);
+    };
 
     for (const line of lines) {
       lineIdx++;
@@ -171,9 +196,9 @@ export default function MembersPage() {
         if (t === '新手' || t === 'novice') experience = 'novice';
         else if (t === '熟练' || t === 'intermediate') experience = 'intermediate';
         else if (t === '老司机' || t === 'expert') experience = 'expert';
-        else if (/老|老人|elderly/i.test(t)) hasElderly = parseBooleanField(token, /老|老人|elderly/gi);
-        else if (/孩|孩子|儿童|children/i.test(t)) hasChildren = parseBooleanField(token, /孩|孩子|儿童|children/gi);
-        else if (/尾|尾车|tail/i.test(t)) willingTail = parseBooleanField(token, /尾|尾车|tail/gi);
+        else if (isKeywordOnly(token, /老|老人|elderly/i)) hasElderly = !NEGATIVE_PREFIX.test(token);
+        else if (isKeywordOnly(token, /孩|孩子|儿童|children/i)) hasChildren = !NEGATIVE_PREFIX.test(token);
+        else if (isKeywordOnly(token, /尾|尾车|tail/i)) willingTail = !NEGATIVE_PREFIX.test(token);
         else if (/^\d{3,}$/.test(token)) phone = token;
         else if (token.length <= 4 && !/^\d+$/.test(token)) {
           if (carColor) {
@@ -181,12 +206,12 @@ export default function MembersPage() {
           } else {
             carColor = token;
           }
-        } else if (i === 6) {
-          hasElderly = parseBoolean(token);
-        } else if (i === 7) {
-          hasChildren = parseBoolean(token);
-        } else if (i === 8) {
-          willingTail = parseBoolean(token);
+        } else if (parseBoolean(token) || NEGATIVE_PREFIX.test(token) || POSITIVE_PREFIX.test(token) || t === 'n' || t === 'no' || t === 'false' || t === '0') {
+          if (i >= 6 || rest.length <= 9) {
+            if (i === 6 || (i === rest.length - 3 && rest.length <= 9)) hasElderly = parseBoolean(token) || (isKeywordOnly(token, /老|老人|elderly/i) && !NEGATIVE_PREFIX.test(token));
+            else if (i === 7 || (i === rest.length - 2 && rest.length <= 9)) hasChildren = parseBoolean(token) || (isKeywordOnly(token, /孩|孩子|children/i) && !NEGATIVE_PREFIX.test(token));
+            else if (i === 8 || (i === rest.length - 1 && rest.length <= 9)) willingTail = parseBoolean(token) || (isKeywordOnly(token, /尾|尾车|tail/i) && !NEGATIVE_PREFIX.test(token));
+          }
         }
       }
 
@@ -337,7 +362,7 @@ export default function MembersPage() {
                   </p>
                   <button
                     type="button"
-                    onClick={() => setBatchText(`张伟,丰田普拉多,800,老司机,13800138000,白色,是,,\n王强,特斯拉Model Y,450,新手,13900139000,银色,,,\n刘芳,大众途观L,700,熟练,13700137000,棕色,老人,孩子,`)}
+                    onClick={() => setBatchText(`张伟,丰田普拉多,800,老司机,13800138000,白色,有老人,无孩子,否\n王强,特斯拉Model Y,450,新手,13900139000,银色,否,有,尾车\n刘芳,大众途观L,700,熟练,13700137000,棕色,Y,Y,1`)}
                     className="text-teal-600 hover:text-teal-700 text-xs font-medium mt-1 inline-flex items-center gap-1"
                   >
                     <FileText className="w-3.5 h-3.5" />

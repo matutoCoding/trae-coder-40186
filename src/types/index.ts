@@ -53,6 +53,15 @@ export type DrivingExperience = 'novice' | 'intermediate' | 'expert';
 
 export type MemberStatus = 'confirmed' | 'pending' | 'cancelled';
 
+export type SignStatus = 'not_arrived' | 'arrived' | 'late' | 'quit';
+
+export interface MemberSignRecord {
+  memberId: string;
+  status: SignStatus;
+  signedAt?: string;
+  remark?: string;
+}
+
 export interface Member {
   id: string;
   name: string;
@@ -81,6 +90,15 @@ export interface Roadbook {
   radioMainChannel: string;
   radioEmergencyChannel: string;
   convoyOrder: string[];
+}
+
+export interface ShareableRoadbookData {
+  v: number;
+  activity: Activity;
+  members: Member[];
+  roadbook: Roadbook;
+  signRecords?: MemberSignRecord[];
+  exportedAt: string;
 }
 
 export interface AnalysisResult {

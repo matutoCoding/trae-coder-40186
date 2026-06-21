@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
 import {
   Route,
@@ -15,18 +16,27 @@ import {
   ChevronDown,
   ChevronUp,
   Download,
+  X,
+  Printer,
+  ClipboardList,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatDuration } from '@/utils/timeCalculator';
+import { buildShareLink } from '@/utils/shareCodec';
+import { openOfflinePrintableRoadbook } from '@/utils/exportRoadbook';
 
 export default function RoadbookPage() {
-  const { activity, members, roadbook, updateRoadbook, publishRoadbook } = useAppStore();
+  const { activity, members, roadbook, updateRoadbook, publishRoadbook, fillMissingAssignments, signRecords } = useAppStore();
+  const navigate = useNavigate();
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedShareLink, setCopiedShareLink] = useState(false);
   const [showRules, setShowRules] = useState(true);
   const [editingRule, setEditingRule] = useState<number | null>(null);
   const [newRule, setNewRule] = useState('');
+  const [showPublishPreview, setShowPublishPreview] = useState(false);
+  const [publishPrep, setPublishPrep] = useState<{ assignedNumbers: string[]; assignedChannels: string[]; missingBefore: { noNumber: string[]; noChannel: string[] } } | null>(null);
 
   const confirmedMembers = members.filter((m) => m.status === 'confirmed');
 
@@ -47,6 +57,30 @@ export default function RoadbookPage() {
     navigator.clipboard.writeText(link);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
+  };
+
+  const handleCopyShareFullLink = () => {
+    const link = buildShareLink(window.location.origin, window.location.pathname.replace(/\/[^/]*$/, ''), activity, members, roadbook, signRecords);
+    navigator.clipboard.writeText(link);
+    setCopiedShareLink(true);
+    setTimeout(() => setCopiedShareLink(false), 2000);
+  };
+
+  const handlePreparePublish = () => {
+    const noNumber = confirmedMembers.filter((m) => !m.carNumber).map((m) => m.name);
+    const noChannel = confirmedMembers.filter((m) => !m.radioChannel).map((m) => m.name);
+    const result = fillMissingAssignments();
+    setPublishPrep({ ...result, missingBefore: { noNumber, noChannel } });
+    setShowPublishPreview(true);
+  };
+
+  const handleConfirmPublish = () => {
+    publishRoadbook();
+    setShowPublishPreview(false);
+  };
+
+  const handleCancelPublish = () => {
+    setShowPublishPreview(false);
   };
 
   const handleAddRule = () => {
@@ -118,7 +152,7 @@ export default function RoadbookPage() {
                   </div>
                   {roadbook.shareCode && (
                     <div className="space-y-2">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 justify-end">
                         <span className="text-sm text-slate-400">分享码：</span>
                         <code className="px-3 py-1.5 bg-slate-700 rounded-lg text-sm font-mono text-teal-400">
                           {roadbook.shareCode}
@@ -131,7 +165,7 @@ export default function RoadbookPage() {
                           {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
                         </button>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 justify-end">
                         <span className="text-sm text-slate-400">成员链接：</span>
                         <button
                           onClick={handleCopyShareLink}
@@ -140,18 +174,50 @@ export default function RoadbookPage() {
                           {copiedLink ? (
                             <>
                               <Check className="w-3.5 h-3.5 text-emerald-400" />
-                              已复制链接
+                              已复制
                             </>
                           ) : (
                             <>
                               <Copy className="w-3.5 h-3.5" />
-                              复制成员查看链接
+                              复制分享码
+                            </>
+                          )}
+                        </button>
+                        <button
+                          onClick={handleCopyShareFullLink}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-xs font-medium transition-colors"
+                        >
+                          {copiedShareLink ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              已复制
+                            </>
+                          ) : (
+                            <>
+                              <Share2 className="w-3.5 h-3.5" />
+                              复制跨设备分享链接
                             </>
                           )}
                         </button>
                       </div>
                     </div>
                   )}
+                  <div className="flex items-center gap-2 justify-end pt-2">
+                    <button
+                      onClick={() => navigate('/execution')}
+                      className="flex items-center gap-1.5 px-3 py-2 bg-teal-500/20 hover:bg-teal-500/30 text-teal-400 hover:text-teal-300 rounded-lg text-sm font-medium transition-colors"
+                    >
+                      <ClipboardList className="w-4 h-4" />
+                      执行签到视图
+                    </button>
+                    <button
+                      onClick={() => openOfflinePrintableRoadbook({ activity, members, roadbook })}
+                      className="flex items-center gap-1.5 px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm font-medium transition-colors"
+                    >
+                      <Printer className="w-4 h-4" />
+                      导出路书 PDF
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -165,7 +231,7 @@ export default function RoadbookPage() {
 
               {!roadbook.published && (
                 <button
-                  onClick={publishRoadbook}
+                  onClick={handlePreparePublish}
                   className="mt-4 flex items-center gap-2 px-6 py-2.5 bg-teal-500 text-white rounded-lg font-medium hover:bg-teal-600 transition-colors shadow-lg shadow-teal-500/30"
                 >
                   <Share2 className="w-4 h-4" />
@@ -484,6 +550,130 @@ export default function RoadbookPage() {
           </div>
         </div>
       </div>
+
+      {showPublishPreview && publishPrep && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+              <h2 className="text-lg font-semibold text-slate-800">发布预览 - 检查编组信息</h2>
+              <button
+                onClick={handleCancelPublish}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto max-h-[60vh] space-y-5">
+              {publishPrep.missingBefore.noNumber.length > 0 && (
+                <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
+                  <p className="text-sm font-medium text-amber-800 mb-1">
+                    以下成员缺少车号，将自动分配：
+                  </p>
+                  <p className="text-sm text-amber-700">
+                    {publishPrep.missingBefore.noNumber.join('，')}
+                  </p>
+                </div>
+              )}
+
+              {publishPrep.missingBefore.noChannel.length > 0 && (
+                <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
+                  <p className="text-sm font-medium text-amber-800 mb-1">
+                    以下成员缺少对讲频道，将自动分配：
+                  </p>
+                  <p className="text-sm text-amber-700">
+                    {publishPrep.missingBefore.noChannel.join('，')}
+                  </p>
+                </div>
+              )}
+
+              {(publishPrep.assignedNumbers.length > 0 || publishPrep.assignedChannels.length > 0) && (
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold text-slate-700">自动分配结果</h3>
+                  {publishPrep.assignedNumbers.length > 0 && (
+                    <div className="p-3 bg-teal-50 rounded-lg">
+                      <p className="text-xs font-medium text-teal-700 mb-2">车号分配：</p>
+                      <ul className="space-y-1 text-sm text-teal-800">
+                        {publishPrep.assignedNumbers.slice(0, 8).map((item, i) => (
+                          <li key={i}>{item}</li>
+                        ))}
+                        {publishPrep.assignedNumbers.length > 8 && (
+                          <li className="text-teal-600">...还有 {publishPrep.assignedNumbers.length - 8} 条</li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
+                  {publishPrep.assignedChannels.length > 0 && (
+                    <div className="p-3 bg-blue-50 rounded-lg">
+                      <p className="text-xs font-medium text-blue-700 mb-2">频道分配：</p>
+                      <ul className="space-y-1 text-sm text-blue-800">
+                        {publishPrep.assignedChannels.slice(0, 8).map((item, i) => (
+                          <li key={i}>{item}</li>
+                        ))}
+                        {publishPrep.assignedChannels.length > 8 && (
+                          <li className="text-blue-600">...还有 {publishPrep.assignedChannels.length - 8} 条</li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <h3 className="text-sm font-semibold text-slate-700 mb-3">
+                  最终编组概览（{convoyMembers.length} 位已确认成员）
+                </h3>
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr>
+                        <th className="px-4 py-2.5 text-left font-medium text-slate-600 w-20">车号</th>
+                        <th className="px-4 py-2.5 text-left font-medium text-slate-600">姓名</th>
+                        <th className="px-4 py-2.5 text-left font-medium text-slate-600">车型</th>
+                        <th className="px-4 py-2.5 text-left font-medium text-slate-600 w-24">频道</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {convoyMembers.map((member) => {
+                        if (!member) return null;
+                        return (
+                          <tr key={member.id} className="hover:bg-slate-50">
+                            <td className="px-4 py-2.5 font-mono font-bold text-teal-600">
+                              {member.carNumber}
+                            </td>
+                            <td className="px-4 py-2.5 text-slate-800">{member.name}</td>
+                            <td className="px-4 py-2.5 text-slate-600">
+                              {member.carModel} · {member.carColor || '未标注'}
+                            </td>
+                            <td className="px-4 py-2.5 font-mono text-slate-700">
+                              {member.radioChannel}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50">
+              <button
+                onClick={handleCancelPublish}
+                className="px-5 py-2.5 text-slate-600 bg-white border border-slate-300 rounded-lg font-medium hover:bg-slate-100 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleConfirmPublish}
+                className="px-5 py-2.5 text-white bg-teal-700 rounded-lg font-medium hover:bg-teal-800 transition-colors shadow-sm"
+              >
+                确认发布
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,11 +1,12 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { MapPin, Users, Route, Car } from 'lucide-react';
+import { MapPin, Users, Route, Car, ClipboardList } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
   { path: '/', label: '活动设置', icon: MapPin },
   { path: '/members', label: '成员确认', icon: Users },
   { path: '/roadbook', label: '车队路书', icon: Route },
+  { path: '/execution', label: '执行签到', icon: ClipboardList },
 ];
 
 export default function Layout() {

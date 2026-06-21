@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { Member } from '@/types';
+import { Activity, Member, Roadbook, MemberSignRecord } from '@/types';
 import {
   Car,
   Radio,
@@ -19,6 +19,7 @@ import {
 import { useSearchParams } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { formatDuration } from '@/utils/timeCalculator';
+import { decodeShareData } from '@/utils/shareCodec';
 
 const nodeTypeIcons: Record<string, any> = {
   meeting: MapPin,
@@ -41,29 +42,60 @@ const nodeTypeConfig = {
 };
 
 export default function PublicRoadbookView() {
-  const { activity, members, roadbook } = useAppStore();
+  const { activity, members, roadbook, signRecords } = useAppStore();
   const [searchParams] = useSearchParams();
   const urlCode = searchParams.get('code');
+  const urlToken = searchParams.get('token');
 
+  const [externalData, setExternalData] = useState<{
+    activity: Activity;
+    members: Member[];
+    roadbook: Roadbook;
+    signRecords?: MemberSignRecord[];
+  } | null>(null);
+  const [externalDecodeError, setExternalDecodeError] = useState<string | null>(null);
   const [codeInput, setCodeInput] = useState(urlCode || '');
-  const [verified, setVerified] = useState(!!urlCode && urlCode === roadbook.shareCode);
+  const [verified, setVerified] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [showRules, setShowRules] = useState(true);
   const [showSchedule, setShowSchedule] = useState(true);
   const [codeError, setCodeError] = useState('');
 
   useEffect(() => {
-    if (urlCode && !verified) {
+    if (urlToken) {
+      const decoded = decodeShareData(urlToken);
+      if (decoded) {
+        setExternalData({
+          activity: decoded.activity,
+          members: decoded.members,
+          roadbook: decoded.roadbook,
+          signRecords: decoded.signRecords,
+        });
+        setExternalDecodeError(null);
+        setVerified(true);
+      } else {
+        setExternalDecodeError('链接无效或已损坏，请尝试使用分享码方式进入');
+      }
+    }
+  }, [urlToken]);
+
+  useEffect(() => {
+    if (!externalData && urlCode && !verified) {
       if (urlCode === roadbook.shareCode) {
         setVerified(true);
       }
     }
-  }, [urlCode, roadbook.shareCode, verified]);
+  }, [urlCode, roadbook.shareCode, verified, externalData]);
 
-  const confirmedMembers = members.filter((m) => m.status === 'confirmed');
+  const effectiveActivity = externalData?.activity ?? activity;
+  const effectiveMembers = externalData?.members ?? members;
+  const effectiveRoadbook = externalData?.roadbook ?? roadbook;
+  const effectiveSignRecords = externalData?.signRecords ?? signRecords;
+
+  const confirmedMembers = effectiveMembers.filter((m) => m.status === 'confirmed');
 
   const handleVerify = () => {
-    if (codeInput.toUpperCase() === roadbook.shareCode) {
+    if (codeInput.toUpperCase() === effectiveRoadbook.shareCode) {
       setVerified(true);
       setCodeError('');
     } else {
@@ -75,7 +107,7 @@ export default function PublicRoadbookView() {
     ? confirmedMembers.find((m) => m.id === selectedMemberId) || null
     : null;
 
-  if (!roadbook.published) {
+  if (!effectiveRoadbook.published) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
         <div className="max-w-md w-full bg-white rounded-2xl shadow-xl border border-slate-200 p-8 text-center">
@@ -102,11 +134,20 @@ export default function PublicRoadbookView() {
             <Car className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-2xl font-bold text-slate-800 text-center mb-2">
-            {activity.name}
+            {effectiveActivity.name}
           </h1>
           <p className="text-sm text-slate-500 text-center mb-6">
             请输入领队分享的 6 位分享码查看您的专属路书
           </p>
+
+          {externalDecodeError && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl">
+              <p className="text-xs text-red-700 flex items-center gap-1.5">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                {externalDecodeError}
+              </p>
+            </div>
+          )}
 
           <div className="space-y-3">
             <div>
@@ -136,8 +177,8 @@ export default function PublicRoadbookView() {
           </div>
 
           <div className="mt-6 pt-6 border-t border-slate-100 text-center text-xs text-slate-400">
-            <p>活动日期：{activity.date}</p>
-            <p className="mt-1">集合时间：{activity.meetingTime} · {activity.meetingPoint}</p>
+            <p>活动日期：{effectiveActivity.date}</p>
+            <p className="mt-1">集合时间：{effectiveActivity.meetingTime} · {effectiveActivity.meetingPoint}</p>
           </div>
         </div>
       </div>
@@ -156,18 +197,24 @@ export default function PublicRoadbookView() {
                   <Car className="w-6 h-6" />
                 </div>
                 <div>
-                  <h1 className="text-xl sm:text-2xl font-bold">{activity.name}</h1>
-                  <p className="text-sm text-slate-400 mt-0.5">{activity.date} · 车队专属路书</p>
+                  <h1 className="text-xl sm:text-2xl font-bold">{effectiveActivity.name}</h1>
+                  <p className="text-sm text-slate-400 mt-0.5">{effectiveActivity.date} · 车队专属路书</p>
                 </div>
               </div>
+              {externalData && (
+                <div className="mb-4 px-3 py-2 bg-emerald-500/20 border border-emerald-400/30 rounded-lg text-xs text-emerald-300 flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5" />
+                  已通过链接验证
+                </div>
+              )}
               <div className="flex items-center gap-4 text-sm flex-wrap">
                 <span className="flex items-center gap-1.5 text-slate-300">
                   <MapPin className="w-4 h-4 text-teal-400" />
-                  {activity.meetingPoint}
+                  {effectiveActivity.meetingPoint}
                 </span>
                 <span className="flex items-center gap-1.5 text-slate-300">
                   <Clock className="w-4 h-4 text-orange-400" />
-                  {activity.meetingTime} 集合
+                  {effectiveActivity.meetingTime} 集合
                 </span>
                 <span className="flex items-center gap-1.5 text-slate-300">
                   <Users className="w-4 h-4 text-emerald-400" />
@@ -227,9 +274,21 @@ export default function PublicRoadbookView() {
     );
   }
 
-  const totalDistance = activity.checkpoints.length > 0
-    ? Math.max(...activity.checkpoints.map((c) => c.distance))
+  const totalDistance = effectiveActivity.checkpoints.length > 0
+    ? Math.max(...effectiveActivity.checkpoints.map((c) => c.distance))
     : 0;
+
+  const currentSignRecord = selectedMember
+    ? effectiveSignRecords?.find((r) => r.memberId === selectedMember.id)
+    : undefined;
+
+  const formatSignTime = (isoString?: string) => {
+    if (!isoString) return '';
+    const d = new Date(isoString);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${hh}:${mm}`;
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 pb-10">
@@ -243,7 +302,7 @@ export default function PublicRoadbookView() {
           </button>
           <span className="text-xs text-slate-400 flex items-center gap-1">
             <Check className="w-3.5 h-3.5 text-emerald-500" />
-            分享码已验证
+            {externalData ? '链接已验证' : '分享码已验证'}
           </span>
         </div>
       </div>
@@ -267,25 +326,25 @@ export default function PublicRoadbookView() {
               </div>
             </div>
 
-            <h2 className="text-lg font-bold mb-1">{activity.name}</h2>
-            <p className="text-sm text-slate-400 mb-5">{activity.date}</p>
+            <h2 className="text-lg font-bold mb-1">{effectiveActivity.name}</h2>
+            <p className="text-sm text-slate-400 mb-5">{effectiveActivity.date}</p>
 
             <div className="grid grid-cols-2 gap-3 pt-5 border-t border-white/10">
               <div>
                 <p className="text-xs text-slate-400">对讲频道</p>
                 <p className="text-base font-mono font-semibold text-orange-400 mt-1">
-                  {selectedMember.radioChannel || roadbook.radioMainChannel}
+                  {selectedMember.radioChannel || effectiveRoadbook.radioMainChannel}
                 </p>
               </div>
               <div>
                 <p className="text-xs text-slate-400">应急频道</p>
                 <p className="text-base font-mono font-semibold text-red-400 mt-1">
-                  {roadbook.radioEmergencyChannel}
+                  {effectiveRoadbook.radioEmergencyChannel}
                 </p>
               </div>
               <div>
                 <p className="text-xs text-slate-400">集合时间</p>
-                <p className="text-base font-semibold mt-1">{activity.meetingTime}</p>
+                <p className="text-base font-semibold mt-1">{effectiveActivity.meetingTime}</p>
               </div>
               <div>
                 <p className="text-xs text-slate-400">您的车型</p>
@@ -294,6 +353,56 @@ export default function PublicRoadbookView() {
                   {selectedMember.carColor ? ` · ${selectedMember.carColor}` : ''}
                 </p>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <div className={cn(
+          'rounded-2xl shadow-sm border p-5',
+          currentSignRecord?.status === 'arrived' && 'bg-emerald-50 border-emerald-200',
+          currentSignRecord?.status === 'late' && 'bg-amber-50 border-amber-200',
+          currentSignRecord?.status === 'quit' && 'bg-red-50 border-red-200',
+          (!currentSignRecord || currentSignRecord.status === 'not_arrived') && 'bg-slate-50 border-slate-200'
+        )}>
+          <div className="flex items-center gap-3">
+            <div className={cn(
+              'w-10 h-10 rounded-xl flex items-center justify-center',
+              currentSignRecord?.status === 'arrived' && 'bg-emerald-100',
+              currentSignRecord?.status === 'late' && 'bg-amber-100',
+              currentSignRecord?.status === 'quit' && 'bg-red-100',
+              (!currentSignRecord || currentSignRecord.status === 'not_arrived') && 'bg-slate-200'
+            )}>
+              {currentSignRecord?.status === 'arrived' && <Check className="w-5 h-5 text-emerald-600" />}
+              {currentSignRecord?.status === 'late' && <Clock className="w-5 h-5 text-amber-600" />}
+              {currentSignRecord?.status === 'quit' && <AlertCircle className="w-5 h-5 text-red-600" />}
+              {(!currentSignRecord || currentSignRecord.status === 'not_arrived') && <MapPin className="w-5 h-5 text-slate-500" />}
+            </div>
+            <div className="flex-1">
+              <p className={cn(
+                'text-sm font-semibold',
+                currentSignRecord?.status === 'arrived' && 'text-emerald-700',
+                currentSignRecord?.status === 'late' && 'text-amber-700',
+                currentSignRecord?.status === 'quit' && 'text-red-700',
+                (!currentSignRecord || currentSignRecord.status === 'not_arrived') && 'text-slate-700'
+              )}>
+                {currentSignRecord?.status === 'arrived' && '已签到'}
+                {currentSignRecord?.status === 'late' && '迟到'}
+                {currentSignRecord?.status === 'quit' && '临时退出'}
+                {(!currentSignRecord || currentSignRecord.status === 'not_arrived') && '未到达'}
+              </p>
+              <p className={cn(
+                'text-xs mt-0.5',
+                currentSignRecord?.status === 'arrived' && 'text-emerald-600',
+                currentSignRecord?.status === 'late' && 'text-amber-600',
+                currentSignRecord?.status === 'quit' && 'text-red-600',
+                (!currentSignRecord || currentSignRecord.status === 'not_arrived') && 'text-slate-500'
+              )}>
+                {(currentSignRecord?.status === 'arrived' || currentSignRecord?.status === 'late') && currentSignRecord.signedAt
+                  ? `签到时间：${formatSignTime(currentSignRecord.signedAt)}`
+                  : !currentSignRecord || currentSignRecord.status === 'not_arrived'
+                    ? '请前往集合点按车号签到'
+                    : currentSignRecord.remark || '已退出本次活动'}
+              </p>
             </div>
           </div>
         </div>
@@ -310,7 +419,7 @@ export default function PublicRoadbookView() {
               <div className="text-left">
                 <h3 className="font-semibold text-slate-800">跟车规则与迟到处理</h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  {roadbook.carRules.length} 条规则 · 请务必遵守
+                  {effectiveRoadbook.carRules.length} 条规则 · 请务必遵守
                 </p>
               </div>
             </div>
@@ -325,7 +434,7 @@ export default function PublicRoadbookView() {
             <div className="px-5 pb-5 space-y-4 border-t border-slate-100 pt-4">
               <div className="space-y-2">
                 <p className="text-xs font-medium text-slate-500">跟车规则</p>
-                {roadbook.carRules.map((rule, i) => (
+                {effectiveRoadbook.carRules.map((rule, i) => (
                   <div key={i} className="flex items-start gap-2.5 p-3 bg-slate-50 rounded-xl">
                     <span className="flex-shrink-0 w-5 h-5 bg-teal-100 text-teal-700 rounded-full flex items-center justify-center text-xs font-bold mt-0.5">
                       {i + 1}
@@ -339,7 +448,7 @@ export default function PublicRoadbookView() {
                   <AlertCircle className="w-3.5 h-3.5" />
                   迟到处理办法
                 </p>
-                <p className="text-sm text-amber-800 leading-relaxed">{roadbook.latePolicy}</p>
+                <p className="text-sm text-amber-800 leading-relaxed">{effectiveRoadbook.latePolicy}</p>
               </div>
             </div>
           )}
@@ -357,7 +466,7 @@ export default function PublicRoadbookView() {
               <div className="text-left">
                 <h3 className="font-semibold text-slate-800">当天行程概览</h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  全程约 {totalDistance}km · {activity.nodes.length} 个节点
+                  全程约 {totalDistance}km · {effectiveActivity.nodes.length} 个节点
                 </p>
               </div>
             </div>
@@ -373,7 +482,7 @@ export default function PublicRoadbookView() {
               <div className="relative mt-4">
                 <div className="absolute left-5 top-0 bottom-0 w-0.5 bg-slate-200"></div>
                 <div className="space-y-4">
-                  {activity.nodes.map((node, i) => {
+                  {effectiveActivity.nodes.map((node, i) => {
                     const config = nodeTypeConfig[node.type] || nodeTypeConfig.driving;
                     const NodeIcon = nodeTypeIcons[node.type] || Clock;
                     return (

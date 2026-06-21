@@ -3,6 +3,7 @@ import Layout from "@/components/Layout";
 import ActivityPage from "@/pages/ActivityPage";
 import MembersPage from "@/pages/MembersPage";
 import RoadbookPage from "@/pages/RoadbookPage";
+import ExecutionPage from "@/pages/ExecutionPage";
 import PublicRoadbookView from "@/pages/PublicRoadbookView";
 
 export default function App() {
@@ -14,6 +15,7 @@ export default function App() {
           <Route path="/" element={<ActivityPage />} />
           <Route path="/members" element={<MembersPage />} />
           <Route path="/roadbook" element={<RoadbookPage />} />
+          <Route path="/execution" element={<ExecutionPage />} />
         </Route>
       </Routes>
     </Router>

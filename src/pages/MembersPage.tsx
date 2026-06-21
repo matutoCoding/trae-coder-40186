@@ -67,6 +67,8 @@ export default function MembersPage() {
   const [batchText, setBatchText] = useState('');
   const [batchError, setBatchError] = useState('');
   const [adoptedIds, setAdoptedIds] = useState<Set<string>>(new Set());
+  const [importPreview, setImportPreview] = useState<{ members: Omit<Member, 'id'>[]; errors: string[] } | null>(null);
+  const [confirmImport, setConfirmImport] = useState(false);
   const [newMember, setNewMember] = useState<MemberFormData>({
     name: '',
     phone: '',
@@ -119,9 +121,29 @@ export default function MembersPage() {
     setShowAddForm(false);
   };
 
-  const parseBatchText = (text: string): Omit<Member, 'id'>[] => {
+  const parseBoolean = (val: string): boolean => {
+    const v = val.trim().toLowerCase();
+    if (!v) return false;
+    const trueValues = ['是', '有', '带', '携', '1', '真', 'y', 'yes', 'true'];
+    const falseValues = ['否', '无', '没', '不', '0', '假', 'n', 'no', 'false'];
+    if (trueValues.includes(v)) return true;
+    if (falseValues.includes(v)) return false;
+    return false;
+  };
+
+  const parseBooleanField = (token: string, keywords: RegExp): boolean => {
+    const t = token.toLowerCase();
+    const hasKeyword = keywords.test(t);
+    if (!hasKeyword) return false;
+    const remaining = token.replace(keywords, '').trim();
+    if (!remaining) return true;
+    return parseBoolean(remaining);
+  };
+
+  const parseBatchText = (text: string): { members: Omit<Member, 'id'>[]; errors: string[] } => {
     const lines = text.trim().split('\n').filter((l) => l.trim());
-    const result: Omit<Member, 'id'>[] = [];
+    const members: Omit<Member, 'id'>[] = [];
+    const errors: string[] = [];
     let lineIdx = 0;
 
     for (const line of lines) {
@@ -136,26 +158,47 @@ export default function MembersPage() {
         throw new Error(`第 ${lineIdx} 行数据不完整：姓名、车型、续航(数字)必填`);
       }
 
-      let experience: DrivingExperience = 'intermediate';
+      let experience: DrivingExperience | null = null;
       let phone = '';
       let carColor = '';
       let hasElderly = false;
       let hasChildren = false;
       let willingTail = false;
 
-      for (const token of rest) {
+      for (let i = 0; i < rest.length; i++) {
+        const token = rest[i];
         const t = token.toLowerCase();
         if (t === '新手' || t === 'novice') experience = 'novice';
         else if (t === '熟练' || t === 'intermediate') experience = 'intermediate';
         else if (t === '老司机' || t === 'expert') experience = 'expert';
-        else if (t.includes('老') || t === 'elderly') hasElderly = true;
-        else if (t.includes('孩') || t.includes('儿童') || t === 'children') hasChildren = true;
-        else if (t.includes('尾') || t === 'tail') willingTail = true;
+        else if (/老|老人|elderly/i.test(t)) hasElderly = parseBooleanField(token, /老|老人|elderly/gi);
+        else if (/孩|孩子|儿童|children/i.test(t)) hasChildren = parseBooleanField(token, /孩|孩子|儿童|children/gi);
+        else if (/尾|尾车|tail/i.test(t)) willingTail = parseBooleanField(token, /尾|尾车|tail/gi);
         else if (/^\d{3,}$/.test(token)) phone = token;
-        else if (token.length <= 4 && !/^\d+$/.test(token)) carColor = token;
+        else if (token.length <= 4 && !/^\d+$/.test(token)) {
+          if (carColor) {
+            errors.push(`第 ${lineIdx} 行：重复识别颜色「${token}」，保留首次识别的「${carColor}」`);
+          } else {
+            carColor = token;
+          }
+        } else if (i === 6) {
+          hasElderly = parseBoolean(token);
+        } else if (i === 7) {
+          hasChildren = parseBoolean(token);
+        } else if (i === 8) {
+          willingTail = parseBoolean(token);
+        }
       }
 
-      result.push({
+      if (!experience) {
+        errors.push(`第 ${lineIdx} 行「${name}」：经验字段为空，使用默认值「熟练」`);
+        experience = 'intermediate';
+      }
+      if (!carColor) {
+        errors.push(`第 ${lineIdx} 行「${name}」：未识别颜色`);
+      }
+
+      members.push({
         name,
         carModel,
         carColor,
@@ -169,23 +212,38 @@ export default function MembersPage() {
       });
     }
 
-    return result;
+    return { members, errors };
   };
 
-  const handleBatchImport = () => {
+  const handlePreviewImport = () => {
     try {
       setBatchError('');
+      setImportPreview(null);
+      setConfirmImport(false);
       const parsed = parseBatchText(batchText);
-      if (parsed.length === 0) {
+      if (parsed.members.length === 0) {
         setBatchError('未解析出有效数据');
         return;
       }
-      batchAddMembers(parsed);
-      setBatchText('');
-      setShowBatchForm(false);
+      setImportPreview(parsed);
+      setConfirmImport(true);
     } catch (err: any) {
       setBatchError(err.message || '解析失败，请检查格式');
     }
+  };
+
+  const handleConfirmImport = () => {
+    if (!importPreview) return;
+    batchAddMembers(importPreview.members);
+    setImportPreview(null);
+    setConfirmImport(false);
+    setBatchText('');
+    setShowBatchForm(false);
+  };
+
+  const handleCancelPreview = () => {
+    setImportPreview(null);
+    setConfirmImport(false);
   };
 
   const handleAdoptStop = (stop: SuggestedStop) => {
@@ -261,7 +319,7 @@ export default function MembersPage() {
                     <Upload className="w-4 h-4 text-teal-600" />
                     批量导入成员
                   </h4>
-                  <button onClick={() => { setShowBatchForm(false); setBatchError(''); setBatchText(''); }} className="text-slate-400 hover:text-slate-600">
+                  <button onClick={() => { setShowBatchForm(false); setBatchError(''); setBatchText(''); setImportPreview(null); setConfirmImport(false); }} className="text-slate-400 hover:text-slate-600">
                     <X className="w-5 h-5" />
                   </button>
                 </div>
@@ -275,7 +333,7 @@ export default function MembersPage() {
                     示例：<code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono">张伟,丰田普拉多,800,老司机,138****1234,白色,,孩子,</code>
                   </p>
                   <p className="text-slate-500">
-                    驾驶经验可选值：新手 / 熟练 / 老司机；老人、孩子、尾车填任意非空值即视为是
+                    驾驶经验可选值：新手 / 熟练 / 老司机；布尔字段（老人/孩子/尾车）支持：是/有/带/携/1/真/Y/YES/true 视为是，否/无/0/N/no/false 或空视为否
                   </p>
                   <button
                     type="button"
@@ -304,18 +362,118 @@ export default function MembersPage() {
 
                 <div className="flex gap-2 mt-4">
                   <button
-                    onClick={handleBatchImport}
+                    onClick={handlePreviewImport}
                     className="px-4 py-2 bg-teal-600 text-white text-sm rounded-md hover:bg-teal-700 transition-colors"
                   >
-                    确认导入
+                    预览解析结果
                   </button>
                   <button
-                    onClick={() => { setShowBatchForm(false); setBatchError(''); setBatchText(''); }}
+                    onClick={() => { setShowBatchForm(false); setBatchError(''); setBatchText(''); setImportPreview(null); setConfirmImport(false); }}
                     className="px-4 py-2 bg-white text-slate-600 text-sm rounded-md border border-slate-300 hover:bg-slate-50 transition-colors"
                   >
                     取消
                   </button>
                 </div>
+
+                {importPreview && (
+                  <div className="mt-4 bg-white rounded-lg border border-slate-200 overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200">
+                      <div className="flex items-center gap-3">
+                        <span className="inline-flex items-center gap-1 text-sm font-medium text-emerald-600">
+                          <CheckCircle2 className="w-4 h-4" />
+                          共解析到 {importPreview.members.length} 位成员
+                        </span>
+                        {importPreview.errors.length > 0 && (
+                          <span className="inline-flex items-center gap-1 text-sm font-medium text-amber-600">
+                            <AlertTriangle className="w-4 h-4" />
+                            {importPreview.errors.length} 条提示
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {importPreview.errors.length > 0 && (
+                      <div className="px-4 py-3 bg-amber-50 border-b border-amber-100 max-h-32 overflow-y-auto">
+                        {importPreview.errors.map((err, idx) => (
+                          <p key={idx} className="text-xs text-amber-700 leading-relaxed">• {err}</p>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="max-h-[300px] overflow-y-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-100 sticky top-0">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-medium text-slate-600 text-xs">姓名</th>
+                            <th className="px-3 py-2 text-left font-medium text-slate-600 text-xs">车型</th>
+                            <th className="px-3 py-2 text-left font-medium text-slate-600 text-xs">续航</th>
+                            <th className="px-3 py-2 text-left font-medium text-slate-600 text-xs">经验</th>
+                            <th className="px-3 py-2 text-left font-medium text-slate-600 text-xs">颜色</th>
+                            <th className="px-3 py-2 text-left font-medium text-slate-600 text-xs">手机</th>
+                            <th className="px-3 py-2 text-center font-medium text-slate-600 text-xs">老人</th>
+                            <th className="px-3 py-2 text-center font-medium text-slate-600 text-xs">孩子</th>
+                            <th className="px-3 py-2 text-center font-medium text-slate-600 text-xs">尾车</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {importPreview.members.map((m, idx) => {
+                            const expCfg = experienceLabels[m.drivingExperience];
+                            return (
+                              <tr key={idx} className="hover:bg-slate-50">
+                                <td className="px-3 py-2 font-medium text-slate-800">{m.name}</td>
+                                <td className="px-3 py-2 text-slate-600">{m.carModel}</td>
+                                <td className="px-3 py-2 text-slate-600">{m.range}km</td>
+                                <td className="px-3 py-2">
+                                  <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium', expCfg.color)}>
+                                    {expCfg.label}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 text-slate-600">{m.carColor || '-'}</td>
+                                <td className="px-3 py-2 text-slate-600 font-mono text-xs">{m.phone || '-'}</td>
+                                <td className="px-3 py-2 text-center">
+                                  {m.hasElderly ? (
+                                    <Check className="w-4 h-4 text-emerald-500 mx-auto" />
+                                  ) : (
+                                    <span className="text-slate-300">-</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 text-center">
+                                  {m.hasChildren ? (
+                                    <Check className="w-4 h-4 text-emerald-500 mx-auto" />
+                                  ) : (
+                                    <span className="text-slate-300">-</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 text-center">
+                                  {m.willingTail ? (
+                                    <Check className="w-4 h-4 text-emerald-500 mx-auto" />
+                                  ) : (
+                                    <span className="text-slate-300">-</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 px-4 py-3 bg-slate-50 border-t border-slate-200">
+                      <button
+                        onClick={handleCancelPreview}
+                        className="px-3 py-1.5 text-xs bg-slate-200 text-slate-600 rounded-md hover:bg-slate-300 transition-colors"
+                      >
+                        取消预览
+                      </button>
+                      <button
+                        onClick={handleConfirmImport}
+                        className="px-4 py-2 bg-teal-700 text-white text-sm font-medium rounded-md hover:bg-teal-800 transition-colors"
+                      >
+                        确认导入这 {importPreview.members.length} 人
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
